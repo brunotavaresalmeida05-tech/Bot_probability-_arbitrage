@@ -1,6 +1,7 @@
 """
 src/dashboard_server.py
 Servidor web leve (FastAPI + WebSockets) que alimenta o dashboard em tempo real.
+Fast-tick streaming: preços/equity actualizados a cada ~200ms.
 """
 
 import json
@@ -35,10 +36,66 @@ _store: dict[str, Any] = {
     "open_positions": [],  # ← lido directamente do MT5
     "started_at": datetime.now().isoformat(),
     "last_update": None,
+    "tick_ts": None,       # timestamp ms do último tick
 }
 
 MAX_EQUITY_POINTS = 500
 MAX_TRADES = 50
+
+# ─────────────────────────────────────────────
+#  FAST TICK STREAMER  (preços a cada ~200ms)
+# ─────────────────────────────────────────────
+_tick_thread = None
+_tick_symbols: list[str] = []
+
+
+def _fast_tick_loop():
+    """Thread que lê ticks do MT5 a alta frequência e actualiza _store."""
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        return
+
+    while True:
+        try:
+            # Actualizar preços de cada símbolo
+            for sym in _tick_symbols:
+                tick = mt5.symbol_info_tick(sym)
+                if tick is None:
+                    continue
+                with _lock:
+                    if sym in _store["symbols"]:
+                        _store["symbols"][sym]["bid"] = round(tick.bid, 6)
+                        _store["symbols"][sym]["ask"] = round(tick.ask, 6)
+                        _store["symbols"][sym]["close"] = round((tick.bid + tick.ask) / 2, 6)
+                        _store["symbols"][sym]["tick_time"] = tick.time
+
+            # Actualizar account equity em tempo real
+            info = mt5.account_info()
+            if info:
+                with _lock:
+                    _store["account"]["equity"] = round(info.equity, 2)
+                    _store["account"]["balance"] = round(info.balance, 2)
+                    _store["account"]["margin"] = round(info.margin, 2)
+                    _store["account"]["free_margin"] = round(info.margin_free, 2)
+                    _store["tick_ts"] = int(time.time() * 1000)
+
+            # Actualizar posições abertas (P&L em tempo real)
+            _refresh_positions()
+
+        except Exception:
+            pass
+
+        time.sleep(0.2)  # ~200ms = 5 updates/segundo
+
+
+def start_tick_stream(symbols: list[str]):
+    """Inicia o streamer de ticks de alta frequência."""
+    global _tick_thread, _tick_symbols
+    _tick_symbols = list(symbols)
+    if _tick_thread is None:
+        _tick_thread = threading.Thread(target=_fast_tick_loop, daemon=True)
+        _tick_thread.start()
 
 
 def update_account(account: dict):
@@ -116,7 +173,6 @@ def add_trade(trade: dict):
 
 
 def get_snapshot() -> dict:
-    _refresh_positions()  # sempre fresco
     with _lock:
         return json.loads(json.dumps(_store))
 
@@ -174,7 +230,8 @@ async def _broadcast(data: str):
             _clients.remove(ws)
 
 
-async def broadcast_loop(interval: float = 1.5):
+async def broadcast_loop(interval: float = 0.2):
+    """Broadcast a cada 200ms para updates em tempo real."""
     while True:
         await asyncio.sleep(interval)
         data = json.dumps(get_snapshot())
@@ -184,6 +241,20 @@ async def broadcast_loop(interval: float = 1.5):
 @app.on_event("startup")
 async def startup():
     asyncio.create_task(broadcast_loop())
+
+
+# ─────────────────────────────────────────────
+#  HELPERS usados pelo main.py
+# ─────────────────────────────────────────────
+
+def set_trading_allowed(v: bool):
+    with _lock:
+        _store["trading_allowed"] = v
+
+
+def set_system_state(state: str):
+    with _lock:
+        _store["system_state"] = state
 
 
 # ─────────────────────────────────────────────

@@ -367,7 +367,11 @@ def run(mode: str):
     log.info("─" * 60)
 
     dash_url = dash.start_server(port=8765, open_browser=True)
+    dash.set_trading_allowed(True)
+    dash.set_system_state("RUNNING")
+    dash.start_tick_stream(cfg.SYMBOLS + cfg.ARB_EXTRA_SYMBOLS)
     log.success(f"Dashboard: {dash_url}", "DASH")
+    log.success("Fast tick stream activo (200ms)", "DASH")
 
     if _OPT and cfg.OPTIMIZER_ENABLED:
         optimizer.start_optimizer_thread(cfg.SYMBOLS)

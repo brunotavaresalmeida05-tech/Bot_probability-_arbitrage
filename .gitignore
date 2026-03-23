@@ -10,6 +10,7 @@ venv/
 # Logs
 logs/*.csv
 logs/*.log
+logs/*.html
 
 # IDE
 .vscode/
