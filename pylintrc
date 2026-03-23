@@ -1,0 +1,16 @@
+[MASTER]
+# Ignorar módulos que o Pylint não consegue analisar (C extensions)
+ignored-modules=MetaTrader5
+
+[MESSAGES CONTROL]
+# Desactivar avisos de estilo que não afectam o funcionamento
+disable=
+    C0116,  # missing-function-docstring
+    C0103,  # invalid-name
+    C0410,  # multiple-imports
+    C0413,  # wrong-import-position
+    C0415,  # import-outside-toplevel
+    W0603,  # global-statement
+    W0718,  # broad-exception-caught
+    E1101,  # no-member (falsos positivos em C extensions como MT5)
+    E1120,  # no-value-for-argument

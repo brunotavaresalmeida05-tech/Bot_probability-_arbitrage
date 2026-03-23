@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MT5 Mean Reversion — Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:       #000000;
+    --surface:  #161b22;
+    --border:   #30363d;
+    --text:     #e6edf3;
+    --muted:    #8b949e;
+    --green:    #3fb950;
+    --red:      #f85149;
+    --blue:     #58a6ff;
+    --yellow:   #d29922;
+    --purple:   #bc8cff;
+    --radius:   8px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ─────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: .5px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+  }
+  .dot.offline { background: var(--red); animation: none; }
+
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50%      { opacity: .3; }
+  }
+
+  .header-meta {
+    display: flex;
+    gap: 28px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .header-meta span b { color: var(--text); }
+
+  /* ── LAYOUT ─────────────────────────────── */
+  main {
+    padding: 20px 24px;
+    display: grid;
+    gap: 20px;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto;
+  }
+
+  /* ── CARDS ──────────────────────────────── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+  }
+
+  .card-title {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ── STAT PILLS ─────────────────────────── */
+  .stats-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+  }
+
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
+  .stat-value { font-size: 22px; font-weight: 700; }
+  .stat-sub   { font-size: 12px; color: var(--muted); }
+
+  .positive { color: var(--green); }
+  .negative { color: var(--red); }
+  .neutral  { color: var(--blue); }
+
+  /* ── SYMBOLS TABLE ──────────────────────── */
+  .symbols-card { grid-column: 1 / -1; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead tr { border-bottom: 1px solid var(--border); }
+
+  th {
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--muted);
+  }
+
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #1e2530;
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1c2333; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .5px;
+  }
+
+  .badge-buy   { background: #1a3a1a; color: var(--green); }
+  .badge-sell  { background: #3a1a1a; color: var(--red); }
+  .badge-none  { background: #1e2530; color: var(--muted); }
+
+  /* Z-score bar */
+  .z-bar-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .z-bar-bg {
+    width: 90px;
+    height: 6px;
+    background: #1e2530;
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .z-bar-fill {
+    position: absolute;
+    top: 0; bottom: 0;
+    border-radius: 3px;
+    transition: all .3s;
+  }
+
+  /* ── CHART CONTAINERS ───────────────────── */
+  .chart-wrap {
+    position: relative;
+    width: 100%;
+    height: 220px;
+  }
+
+  /* ── TRADES LOG ─────────────────────────── */
+  .trades-card { grid-column: 1 / -1; }
+
+  .trade-row {
+    display: grid;
+    grid-template-columns: 140px 80px 80px 100px 100px 90px 1fr;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 4px;
+    border-bottom: 1px solid #1e2530;
+    font-size: 12px;
+  }
+
+  .trade-row:last-child { border-bottom: none; }
+  .trade-row.header { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .8px; }
+
+  .empty-state {
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 24px;
+  }
+
+  /* ── STATUS BAR ─────────────────────────── */
+  footer {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 6px 24px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <h1>
+    <span class="dot" id="dot"></span>
+    🤖 MT5 Mean Reversion Dashboard
+  </h1>
+  <div class="header-meta">
+    <span>Conta: <b id="h-login">–</b></span>
+    <span>Servidor: <b id="h-server">–</b></span>
+    <span>Moeda: <b id="h-currency">–</b></span>
+    <span>Uptime: <b id="h-uptime">–</b></span>
+  </div>
+</header>
+
+<main>
+
+  <!-- STAT PILLS -->
+  <div class="stats-row">
+    <div class="stat">
+      <div class="stat-label">💰 Saldo</div>
+      <div class="stat-value neutral" id="s-balance">–</div>
+      <div class="stat-sub">account balance</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">📈 Equity</div>
+      <div class="stat-value" id="s-equity">–</div>
+      <div class="stat-sub" id="s-equity-diff">–</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">🔓 Margem Usada</div>
+      <div class="stat-value" id="s-margin">–</div>
+      <div class="stat-sub">margin</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">📊 Posições Abertas</div>
+      <div class="stat-value neutral" id="s-positions">–</div>
+      <div class="stat-sub">open positions</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">🏁 Trades Hoje</div>
+      <div class="stat-value" id="s-trades-today">–</div>
+      <div class="stat-sub">closed today</div>
+    </div>
+  </div>
+
+  <!-- EQUITY CURVE -->
+  <div class="card">
+    <div class="card-title">📈 Equity Curve (tempo real)</div>
+    <div class="chart-wrap">
+      <canvas id="equity-chart"></canvas>
+    </div>
+  </div>
+
+  <!-- Z-SCORE CHART (último símbolo activo) -->
+  <div class="card">
+    <div class="card-title">〰 Z-Score History — <span id="z-chart-label" style="color:var(--blue)">–</span></div>
+    <div class="chart-wrap">
+      <canvas id="z-chart"></canvas>
+    </div>
+    <!-- Selector de símbolo -->
+    <div style="margin-top:10px; display:flex; gap:6px; flex-wrap:wrap;" id="symbol-btns"></div>
+  </div>
+
+  <!-- SYMBOLS TABLE -->
+  <div class="card symbols-card">
+    <div class="card-title">🌐 Símbolos em tempo real</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Símbolo</th>
+          <th>Z-Score</th>
+          <th>Close</th>
+          <th>MA</th>
+          <th>Spread (pts)</th>
+          <th>Sinal</th>
+          <th>Posição</th>
+          <th>P&amp;L aberto</th>
+        </tr>
+      </thead>
+      <tbody id="symbols-tbody">
+        <tr><td colspan="8" class="empty-state">A aguardar dados…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- POSIÇÕES ABERTAS (lidas directamente do MT5) -->
+  <div class="card trades-card">
+    <div class="card-title">🔓 Posições abertas (MT5)</div>
+    <div class="trade-row header">
+      <div>Hora</div><div>Símbolo</div><div>Dir</div>
+      <div>Entrada</div><div>S/L</div><div>Lots</div><div>P&amp;L</div><div>Tipo</div>
+    </div>
+    <div id="open-positions-list">
+      <div class="empty-state">Nenhuma posição aberta.</div>
+    </div>
+  </div>
+
+  <!-- MACRO INTELLIGENCE PANEL -->
+  <div class="card trades-card" id="macro-panel">
+    <div class="card-title">🌐 Macro Intelligence Engine</div>
+    <div id="macro-content">
+      <div class="empty-state">A calcular contexto macro…</div>
+    </div>
+  </div>
+
+  <!-- TRADES LOG -->
+  <div class="card trades-card">
+    <div class="card-title">📋 Últimos trades fechados</div>
+    <div class="trade-row header">
+      <div>Hora</div><div>Símbolo</div><div>Dir</div>
+      <div>Entrada</div><div>Saída</div><div>P&amp;L</div><div>Motivo</div>
+    </div>
+    <div id="trades-list">
+      <div class="empty-state">Nenhum trade fechado ainda.</div>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <span id="f-status">A ligar…</span>
+  <span id="f-time">–</span>
+</footer>
+
+<script>
+// ─────────────────────────────────────────────
+//  CHART.JS SETUP
+// ─────────────────────────────────────────────
+
+const CHART_DEFAULTS = {
+  animation: false,
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { display: false } },
+  scales: {
+    x: {
+      ticks: { color: '#8b949e', maxTicksLimit: 8, font: { size: 10 } },
+      grid:  { color: '#1e2530' },
+    },
+    y: {
+      ticks: { color: '#8b949e', font: { size: 10 } },
+      grid:  { color: '#1e2530' },
+    }
+  }
+};
+
+// Equity chart
+const equityCtx = document.getElementById('equity-chart').getContext('2d');
+const equityChart = new Chart(equityCtx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      data: [],
+      borderColor: '#58a6ff',
+      backgroundColor: 'rgba(88,166,255,0.08)',
+      borderWidth: 2,
+      pointRadius: 0,
+      fill: true,
+      tension: 0.3,
+    }]
+  },
+  options: {
+    ...CHART_DEFAULTS,
+    scales: {
+      ...CHART_DEFAULTS.scales,
+      y: { ...CHART_DEFAULTS.scales.y, position: 'right' }
+    }
+  }
+});
+
+// Z-score chart
+const zCtx = document.getElementById('z-chart').getContext('2d');
+const zChart = new Chart(zCtx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      {
+        data: [],
+        borderColor: '#bc8cff',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3,
+        label: 'Z-score',
+      },
+      // Linha Z_ENTER
+      { data: [], borderColor: 'rgba(248,81,73,0.5)', borderDash: [4,4], borderWidth: 1, pointRadius: 0, label: '+Z_ENTER' },
+      { data: [], borderColor: 'rgba(63,185,80,0.5)',  borderDash: [4,4], borderWidth: 1, pointRadius: 0, label: '-Z_ENTER' },
+      // Linha zero
+      { data: [], borderColor: 'rgba(139,148,158,0.3)', borderWidth: 1, pointRadius: 0, label: '0' },
+    ]
+  },
+  options: {
+    ...CHART_DEFAULTS,
+    plugins: {
+      legend: {
+        display: true,
+        labels: { color: '#8b949e', font: { size: 10 }, boxWidth: 20 }
+      }
+    }
+  }
+});
+
+// ─────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────
+
+let selectedSymbol = null;
+let startedAt      = null;
+let lastData       = null;
+const Z_ENTER      = 2.0;  // será atualizado se vier do servidor
+let tradesCount    = 0;
+
+// ─────────────────────────────────────────────
+//  RENDER
+// ─────────────────────────────────────────────
+
+function fmt(v, digits=5) {
+  if (v === null || v === undefined || isNaN(v)) return '–';
+  return Number(v).toFixed(digits);
+}
+
+function fmtMoney(v) {
+  if (v === null || v === undefined) return '–';
+  return Number(v).toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function render(data) {
+  lastData = data;
+
+  // Header
+  const acc = data.account || {};
+  document.getElementById('h-login').textContent    = acc.login    || '–';
+  document.getElementById('h-server').textContent   = acc.server   || '–';
+  document.getElementById('h-currency').textContent = acc.currency || '–';
+
+  if (!startedAt && data.started_at) {
+    startedAt = new Date(data.started_at);
+  }
+  if (startedAt) {
+    const diff = Math.floor((Date.now() - startedAt) / 1000);
+    const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60), s = diff % 60;
+    document.getElementById('h-uptime').textContent =
+      `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+
+  // Stats
+  const balance = acc.balance || 0;
+  const equity  = acc.equity  || 0;
+  const margin  = acc.margin  || 0;
+  const diff    = equity - balance;
+
+  document.getElementById('s-balance').textContent = fmtMoney(balance) + ' ' + (acc.currency || '');
+
+  const equEl = document.getElementById('s-equity');
+  equEl.textContent = fmtMoney(equity) + ' ' + (acc.currency || '');
+  equEl.className   = 'stat-value ' + (diff >= 0 ? 'positive' : 'negative');
+
+  document.getElementById('s-equity-diff').textContent =
+    (diff >= 0 ? '+' : '') + fmtMoney(diff);
+
+  document.getElementById('s-margin').textContent = fmtMoney(margin);
+
+  // Equity chart
+  const ec = data.equity_curve || [];
+  equityChart.data.labels   = ec.map(p => p.t);
+  equityChart.data.datasets[0].data = ec.map(p => p.v);
+  equityChart.update('none');
+
+  // Symbols
+  const syms = data.symbols || {};
+  const symKeys = Object.keys(syms);
+
+  // Sync symbol buttons
+  const btnContainer = document.getElementById('symbol-btns');
+  if (btnContainer.children.length !== symKeys.length) {
+    btnContainer.innerHTML = '';
+    symKeys.forEach(s => {
+      const btn = document.createElement('button');
+      btn.textContent = s;
+      btn.dataset.sym = s;
+      btn.style.cssText = `
+        background: #1e2530; border: 1px solid #30363d; color: #8b949e;
+        padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
+      `;
+      btn.onclick = () => { selectedSymbol = s; updateZChart(syms[s], s); };
+      btnContainer.appendChild(btn);
+    });
+    if (!selectedSymbol && symKeys.length > 0) selectedSymbol = symKeys[0];
+  }
+
+  // Open positions — lê directamente do MT5 via store
+  const openPositions = data.open_positions || [];
+  const openCount = openPositions.length;
+  renderOpenPositions(openPositions);
+
+  const tbody = document.getElementById('symbols-tbody');
+  tbody.innerHTML = '';
+
+  symKeys.forEach(sym => {
+    const s = syms[sym];
+    const z = s.z;
+    const pos = s.position;
+    const pnl = s.pnl;
+
+    const zNum   = parseFloat(z);
+    const zColor = isNaN(zNum) ? '#8b949e' : (zNum <= -1.5 ? '#3fb950' : zNum >= 1.5 ? '#f85149' : '#e6edf3');
+    const zPct   = isNaN(zNum) ? 50 : Math.min(Math.max((zNum / 4 + 0.5) * 100, 0), 100);
+    const zBarColor = isNaN(zNum) ? '#30363d' : (zNum < 0 ? '#3fb950' : '#f85149');
+
+    const pnlStr   = (pnl !== null && pnl !== undefined)
+      ? `<span class="${pnl >= 0 ? 'positive' : 'negative'}">${pnl >= 0 ? '+' : ''}${fmtMoney(pnl)}</span>`
+      : '<span style="color:#8b949e">–</span>';
+
+    const sigBadge =
+      s.signal === 'BUY'  ? '<span class="badge badge-buy">▲ BUY</span>'  :
+      s.signal === 'SELL' ? '<span class="badge badge-sell">▼ SELL</span>' :
+                             '<span class="badge badge-none">–</span>';
+
+    const posBadge =
+      pos === 'BUY'  ? '<span class="badge badge-buy">▲ BUY</span>'  :
+      pos === 'SELL' ? '<span class="badge badge-sell">▼ SELL</span>' :
+                       '<span style="color:#8b949e">–</span>';
+
+    tbody.innerHTML += `
+      <tr>
+        <td><b>${sym}</b></td>
+        <td>
+          <div class="z-bar-wrap">
+            <span style="color:${zColor};font-weight:600;min-width:54px">${isNaN(zNum)?'–':zNum.toFixed(3)}</span>
+            <div class="z-bar-bg">
+              <div class="z-bar-fill" style="
+                left:${zNum<0?zPct+'%':'50%'};
+                right:${zNum>=0?(100-zPct)+'%':'50%'};
+                background:${zBarColor};
+              "></div>
+            </div>
+          </div>
+        </td>
+        <td>${fmt(s.close)}</td>
+        <td>${fmt(s.ma)}</td>
+        <td>${fmt(s.spread, 1)}</td>
+        <td>${sigBadge}</td>
+        <td>${posBadge}</td>
+        <td>${pnlStr}</td>
+      </tr>`;
+  });
+
+  if (!tbody.innerHTML) {
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-state">A aguardar dados…</td></tr>';
+  }
+
+  document.getElementById('s-positions').textContent = openCount;
+  document.getElementById('s-trades-today').textContent = (data.trades || []).length;
+
+  // Z-chart for selected symbol
+  if (selectedSymbol && syms[selectedSymbol]) {
+    updateZChart(syms[selectedSymbol], selectedSymbol);
+  }
+
+  // Trades
+  renderTrades(data.trades || []);
+
+  // Macro panel
+  renderMacro(data.symbols || {});
+
+  // Footer
+  document.getElementById('f-time').textContent =
+    'Última atualização: ' + new Date().toLocaleTimeString('pt-PT');
+}
+
+
+function renderMacro(syms) {
+  const el = document.getElementById('macro-content');
+  if (!el) return;
+  const symKeys = Object.keys(syms);
+  if (!symKeys.length) {
+    el.innerHTML = '<div class="empty-state">A aguardar dados macro…</div>';
+    return;
+  }
+
+  const rows = symKeys.map(sym => {
+    const s     = syms[sym];
+    const score = parseFloat(s.macro_score ?? 0);
+    const regime = s.macro_regime || 'neutral';
+    const isNaN_ = isNaN(score);
+
+    const scoreColor = isNaN_ ? '#8b949e'
+      : score >= 0.3  ? '#3fb950'
+      : score <= -0.3 ? '#f85149'
+      : '#e6edf3';
+
+    const regimeBadge = regime === 'risk_on'
+      ? '<span class="badge badge-buy">risk on</span>'
+      : regime === 'risk_off'
+      ? '<span class="badge badge-sell">risk off</span>'
+      : '<span class="badge badge-none">neutral</span>';
+
+    const scoreBar = isNaN_ ? '' : (() => {
+      const pct = Math.min(Math.max((score + 1) / 2 * 100, 0), 100);
+      const bc  = score < 0 ? '#f85149' : '#3fb950';
+      return `<div class="z-bar-bg" style="width:100px">
+        <div class="z-bar-fill" style="
+          left:${score<0?pct+'%':'50%'};
+          right:${score>=0?(100-pct)+'%':'50%'};
+          background:${bc};
+        "></div>
+      </div>`;
+    })();
+
+    return `
+      <div style="display:grid;grid-template-columns:90px 80px 110px 100px 1fr;
+                  align-items:center;gap:12px;padding:9px 4px;
+                  border-bottom:1px solid #1e2530;font-size:12px;">
+        <div><b>${sym}</b></div>
+        <div style="color:${scoreColor};font-weight:600">${isNaN_?'–':score.toFixed(3)}</div>
+        <div>${scoreBar}</div>
+        <div>${regimeBadge}</div>
+        <div style="color:#8b949e;font-size:11px">
+          ${(s.macro_reasons || []).slice(0,2).join(' · ') || '–'}
+        </div>
+      </div>`;
+  }).join('');
+
+  // Header
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:90px 80px 110px 100px 1fr;
+                gap:12px;padding:6px 4px;font-size:10px;
+                text-transform:uppercase;letter-spacing:.8px;color:#8b949e;
+                border-bottom:1px solid #30363d;">
+      <div>Símbolo</div><div>Score</div><div>Barra</div>
+      <div>Regime</div><div>Razões principais</div>
+    </div>
+    ${rows}
+    <div style="padding:8px 4px;font-size:10px;color:#8b949e">
+      Score: +1.0 = macro muito favorável · −1.0 = macro adverso (bloqueia trade em ≤−0.6)
+    </div>`;
+}
+
+
+function updateZChart(symData, symName) {
+  document.getElementById('z-chart-label').textContent = symName;
+  const hist = symData.zscore_history || [];
+  const labels = hist.map(p => p.t);
+  const vals   = hist.map(p => p.v);
+  const n      = vals.length;
+
+  zChart.data.labels = labels;
+  zChart.data.datasets[0].data = vals;
+  zChart.data.datasets[1].data = Array(n).fill(Z_ENTER);
+  zChart.data.datasets[2].data = Array(n).fill(-Z_ENTER);
+  zChart.data.datasets[3].data = Array(n).fill(0);
+  zChart.update('none');
+}
+
+
+function renderOpenPositions(positions) {
+  const el = document.getElementById('open-positions-list');
+  if (!el) return;
+  if (!positions.length) {
+    el.innerHTML = '<div class="empty-state">Nenhuma posição aberta.</div>';
+    return;
+  }
+  const totalPnl = positions.reduce((s, p) => s + (p.profit || 0), 0);
+  el.innerHTML = positions.map(p => {
+    const pnl = parseFloat(p.profit || 0);
+    const pnlStr = `<span class="${pnl >= 0 ? 'positive' : 'negative'}" style="font-weight:600">${pnl >= 0 ? '+' : ''}${fmtMoney(pnl)}</span>`;
+    const dirBadge = p.type === 'BUY'
+      ? '<span class="badge badge-buy">▲ BUY</span>'
+      : '<span class="badge badge-sell">▼ SELL</span>';
+    const magic = p.magic === 20240101 ? '<span style="color:#8b949e;font-size:10px">MR</span>'
+                : p.magic === 20240102 ? '<span style="color:#bc8cff;font-size:10px">ARB</span>'
+                : `<span style="color:#8b949e;font-size:10px">${p.magic}</span>`;
+    return `
+      <div class="trade-row">
+        <div style="color:#8b949e">${p.time || '–'}</div>
+        <div><b>${p.symbol}</b></div>
+        <div>${dirBadge}</div>
+        <div>${fmt(p.entry)}</div>
+        <div style="color:#8b949e">${fmt(p.sl)}</div>
+        <div>${p.lots}</div>
+        <div>${pnlStr}</div>
+        <div>${magic}</div>
+      </div>`;
+  }).join('') + `
+    <div style="padding:8px 4px;font-size:12px;border-top:1px solid #30363d;display:flex;justify-content:flex-end;gap:8px">
+      <span style="color:#8b949e">Total P&L:</span>
+      <span class="${totalPnl >= 0 ? 'positive' : 'negative'}" style="font-weight:600">${totalPnl >= 0 ? '+' : ''}${fmtMoney(totalPnl)}</span>
+    </div>`;
+}
+
+
+function renderTrades(trades) {
+  const el = document.getElementById('trades-list');
+  if (!trades.length) {
+    el.innerHTML = '<div class="empty-state">Nenhum trade fechado ainda.</div>';
+    return;
+  }
+  el.innerHTML = trades.map(t => {
+    const pnl = parseFloat(t.profit_currency || 0);
+    const pnlStr = `<span class="${pnl >= 0 ? 'positive' : 'negative'}" style="font-weight:600">${pnl >= 0 ? '+' : ''}${fmtMoney(pnl)}</span>`;
+    const dirBadge = t.direction === 'BUY'
+      ? '<span class="badge badge-buy">▲ BUY</span>'
+      : '<span class="badge badge-sell">▼ SELL</span>';
+    return `
+      <div class="trade-row">
+        <div style="color:#8b949e">${t.timestamp || '–'}</div>
+        <div><b>${t.symbol || '–'}</b></div>
+        <div>${dirBadge}</div>
+        <div>${fmt(t.entry_price)}</div>
+        <div>${fmt(t.exit_price)}</div>
+        <div>${pnlStr}</div>
+        <div style="color:#8b949e;font-size:11px">${t.reason || '–'}</div>
+      </div>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────
+//  WEBSOCKET
+// ─────────────────────────────────────────────
+
+let ws, reconnectTimer;
+
+function connect() {
+  const url = `ws://${location.host}/ws`;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => {
+    document.getElementById('dot').classList.remove('offline');
+    document.getElementById('f-status').textContent = '🟢 Conectado ao bot';
+    clearInterval(reconnectTimer);
+    // Ping keepalive
+    setInterval(() => { if (ws.readyState === 1) ws.send('ping'); }, 5000);
+  };
+
+  ws.onmessage = (e) => {
+    try { render(JSON.parse(e.data)); } catch(err) { console.warn(err); }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('dot').classList.add('offline');
+    document.getElementById('f-status').textContent = '🔴 Desligado — a reconectar…';
+    reconnectTimer = setTimeout(connect, 3000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+// Uptime ticker
+setInterval(() => {
+  if (startedAt) {
+    const diff = Math.floor((Date.now() - startedAt) / 1000);
+    const h = Math.floor(diff / 3600), m = Math.floor((diff % 3600) / 60), s = diff % 60;
+    document.getElementById('h-uptime').textContent =
+      `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  }
+}, 1000);
+
+connect();
+</script>
+</body>
+</html>
