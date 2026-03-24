@@ -21,6 +21,7 @@ import src.mt5_connector as mt5c
 
 
 # Correlações conhecidas entre pares (sinal: +1 move juntos, -1 move opostos)
+# Inclui nomes ActivTrades (Usa500, Ger40, GOLD, SILVER)
 PAIR_CORRELATIONS = {
     ("EURUSD", "GBPUSD"):  +0.85,
     ("EURUSD", "AUDUSD"):  +0.75,
@@ -30,11 +31,17 @@ PAIR_CORRELATIONS = {
     ("USDJPY", "USDCHF"):  +0.75,
     ("USDJPY", "USDCAD"):  +0.65,
     ("AUDUSD", "NZDUSD"):  +0.92,
-    ("XAUUSD", "EURUSD"):  +0.60,
-    ("XAUUSD", "USDJPY"):  -0.55,
-    ("US500",  "US100"):   +0.95,
-    ("US500",  "GER40"):   +0.80,
-    ("US500",  "XAUUSD"):  -0.40,
+    # Metais
+    ("GOLD",   "EURUSD"):  +0.60,
+    ("GOLD",   "USDJPY"):  -0.55,
+    ("GOLD",   "SILVER"):  +0.90,
+    ("GOLD",   "Usa500"):  -0.40,
+    # Índices
+    ("Usa500", "Ger40"):   +0.80,
+    ("Usa500", "UK100"):   +0.85,
+    ("Ger40",  "UK100"):   +0.75,
+    ("Usa500", "EURUSD"):  +0.30,
+    ("Usa500", "USDJPY"):  +0.45,
 }
 
 # Exposição máxima por moeda (% do saldo)
@@ -56,18 +63,31 @@ def get_currency_exposure(positions: list) -> dict:
     """
     Calcula exposição por moeda nas posições abertas.
     Retorna dict: {currency: net_lots}  positivo=long, negativo=short
+    Suporta FX (6 chars), índices (US500, GER40) e metais (XAUUSD).
     """
     exposure = {}
 
+    # Mapa de índices/metais → moedas equivalentes (nomes ActivTrades)
+    INDEX_MAP = {
+        "Usa500": ("US500", "USD"), "US500": ("US500", "USD"),
+        "US100": ("US100", "USD"),  "Ger40": ("GER40", "EUR"),
+        "GER40": ("GER40", "EUR"),  "UK100": ("UK100", "GBP"),
+        "GOLD": ("XAU", "USD"),     "XAUUSD": ("XAU", "USD"),
+        "SILVER": ("XAG", "USD"),   "XAGUSD": ("XAG", "USD"),
+    }
+
     for pos in positions:
         sym = pos.symbol
-        if len(sym) < 6:
-            continue
-
-        base  = sym[:3].upper()
-        quote = sym[3:6].upper()
-        lots  = pos.volume
+        lots = pos.volume
         direction = 1 if pos.type == 0 else -1  # 0=BUY, 1=SELL
+
+        if sym in INDEX_MAP:
+            base, quote = INDEX_MAP[sym]
+        elif len(sym) >= 6:
+            base = sym[:3].upper()
+            quote = sym[3:6].upper()
+        else:
+            continue
 
         # Long EURUSD = long EUR, short USD
         exposure[base]  = exposure.get(base, 0.0)  + direction * lots

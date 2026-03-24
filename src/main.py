@@ -1,6 +1,7 @@
 """
-src/main.py  —  v5
+src/main.py  —  v6
 Loop principal com: MTF + Portfolio Manager + Triangular ARB + Macro Engine
++ Daily Report + Paper Tracker 30d + Índices/Metais
 """
 
 import time
@@ -51,6 +52,18 @@ try:
 except ImportError:
     _TRI = False
 
+try:
+    import src.daily_report as daily_report
+    _REPORT = True
+except ImportError:
+    _REPORT = False
+
+try:
+    import src.paper_tracker as paper_tracker
+    _PAPER_TRACKER = True
+except ImportError:
+    _PAPER_TRACKER = False
+
 # ─── Estado global ───────────────────────────────────────────
 last_bar_time: dict = {}
 daily_states:  dict = {}
@@ -63,7 +76,7 @@ PAPER_MODE = False
 def _get_all_bars():   return _bars_cache
 def _get_all_prices():
     prices = {}
-    for sym in cfg.SYMBOLS + cfg.ARB_EXTRA_SYMBOLS:
+    for sym in cfg.ALL_SYMBOLS + cfg.ARB_EXTRA_SYMBOLS:
         tick = mt5c.get_tick(sym)
         if tick:
             prices[sym] = (tick.bid + tick.ask) / 2
@@ -357,47 +370,62 @@ def run(mode: str):
         log.error("Não foi possível ligar ao MT5.")
         sys.exit(1)
 
+    # Todos os símbolos activos (FX + índices + metais)
+    active_symbols = cfg.ALL_SYMBOLS
+
     account = mt5c.get_account_info()
-    log.print_header(cfg.SYMBOLS, account)
+    log.print_header(active_symbols, account)
 
     if PAPER_MODE:
         log.warning("⚠ MODO PAPER: sem ordens reais")
 
     log.info(f"Loop a cada {cfg.LOOP_INTERVAL_SECONDS}s | TF: {cfg.TIMEFRAME}")
+    log.info(f"Símbolos: {len(cfg.SYMBOLS)} FX + {len(cfg.INDICES_SYMBOLS)} índices + {len(cfg.METALS_SYMBOLS)} metais")
     log.info("─" * 60)
 
     dash_url = dash.start_server(port=8765, open_browser=True)
     dash.set_trading_allowed(True)
     dash.set_system_state("RUNNING")
-    dash.start_tick_stream(cfg.SYMBOLS + cfg.ARB_EXTRA_SYMBOLS)
+    dash.start_tick_stream(active_symbols + cfg.ARB_EXTRA_SYMBOLS)
     log.success(f"Dashboard: {dash_url}", "DASH")
     log.success("Fast tick stream activo (200ms)", "DASH")
 
     if _OPT and cfg.OPTIMIZER_ENABLED:
-        optimizer.start_optimizer_thread(cfg.SYMBOLS)
+        optimizer.start_optimizer_thread(active_symbols)
 
     if _MACRO and cfg.USE_MACRO_ENGINE:
-        macro.start_macro_engine(cfg.SYMBOLS, _get_all_bars, _get_all_prices)
+        macro.start_macro_engine(active_symbols, _get_all_bars, _get_all_prices)
         log.success("Macro Engine iniciado (7 camadas)", "MACRO")
 
     if _MTF and cfg.USE_MULTI_TIMEFRAME:
         log.success("Multi-Timeframe activo (M5+H1+D1)", "MTF")
 
     if _PM and cfg.USE_PORTFOLIO_MANAGER:
-        log.success("Portfolio Manager activo", "PM")
+        log.success("Portfolio Manager activo (FX + índices + metais)", "PM")
 
     if _TRI and cfg.TRIANGULAR_ARB_ENABLED:
         log.success("Triangular ARB activo", "TRI")
 
+    # Relatório diário automático
+    if _REPORT:
+        daily_report.start_daily_report_scheduler()
+        log.success("Relatório diário automático activo", "REPORT")
+
+    # Paper tracker
+    if _PAPER_TRACKER and PAPER_MODE:
+        log.success("Paper Tracker 30d activo", "PAPER")
+
     try:
         while True:
+            now = datetime.now()
             account = mt5c.get_account_info()
             balance = account.get("balance", 0.0)
+            equity = account.get("equity", balance)
             dash.update_account(account)
             rows = []
 
-            # Mean Reversion + MTF
-            for symbol in cfg.SYMBOLS:
+            # Mean Reversion + MTF — todos os símbolos activos
+            for symbol in active_symbols:
                 try:
                     row = process_symbol(symbol, balance)
                     rows.append(row)
@@ -408,7 +436,7 @@ def run(mode: str):
 
             # Macro summary
             if _MACRO and cfg.USE_MACRO_ENGINE:
-                for sym in cfg.SYMBOLS:
+                for sym in active_symbols:
                     ctx = macro.get_macro_context(sym)
                     sc  = ctx.get("score", 0.0)
                     reg = ctx.get("regime", "?")
@@ -416,7 +444,7 @@ def run(mode: str):
                     c   = "green" if sc > 0.2 else ("red" if sc < -0.2 else "dim")
                     log.info(f"[{c}]{sc:+.3f} {reg} lot×{mul:.2f}[/]", f"MACRO/{sym}")
 
-            # Arbitragem Stat
+            # Arbitragem Stat (apenas pares FX)
             try:
                 arb_results = arb_runner.run_arb_cycle(cfg.SYMBOLS, balance)
                 active = [r for r in arb_results if r.get("arb_signal")]
@@ -451,12 +479,40 @@ def run(mode: str):
                 except Exception as e:
                     log.error(f"PM erro: {e}", "PM")
 
+            # Paper tracker — registar ao fim da sessão
+            if _PAPER_TRACKER and PAPER_MODE:
+                if now.hour == cfg.SESSION_END_HOUR and now.minute < 15:
+                    paper_tracker.end_of_day_hook(balance, equity)
+
             log.info(f"[dim]Próxima verificação em {cfg.LOOP_INTERVAL_SECONDS}s[/]")
             time.sleep(cfg.LOOP_INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
         log.warning("Bot parado (Ctrl+C)")
     finally:
+        # Registar dia no paper tracker antes de sair
+        if _PAPER_TRACKER and PAPER_MODE:
+            try:
+                account = mt5c.get_account_info()
+                paper_tracker.end_of_day_hook(
+                    account.get("balance", 0),
+                    account.get("equity", 0),
+                )
+                paper_tracker.print_go_live_report()
+            except Exception:
+                pass
+
+        # Gerar relatório diário ao fechar
+        if _REPORT:
+            try:
+                paper_stats = None
+                if _PAPER_TRACKER:
+                    paper_stats = paper_tracker.get_rolling_stats()
+                path = daily_report.generate_daily_report(paper_stats=paper_stats)
+                log.success(f"Relatório diário: {path}", "REPORT")
+            except Exception as e:
+                log.error(f"Erro relatório: {e}", "REPORT")
+
         mt5c.disconnect()
         log.info("MT5 desligado.")
 

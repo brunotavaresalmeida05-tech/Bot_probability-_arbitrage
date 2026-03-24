@@ -101,7 +101,10 @@ def compute_carry_score(symbol: str) -> dict:
     result = {"score": 0.0, "rate_base": None, "rate_quote": None,
               "differential": None, "signal": None}
 
-    if len(symbol) < 6:
+    # Índices e metais não têm carry trade FX
+    NON_FX = {"Usa500", "US500", "US100", "Ger40", "GER40", "UK100",
+              "GOLD", "SILVER", "XAUUSD", "XAGUSD"}
+    if symbol in NON_FX or len(symbol) < 6:
         return result
 
     base  = symbol[:3].upper()
@@ -252,7 +255,9 @@ def compute_cb_stance(currency: str) -> dict:
 
 def compute_monetary_score(symbol: str) -> dict:
     """Score de política monetária para um par FX."""
-    if len(symbol) < 6:
+    NON_FX = {"Usa500", "US500", "US100", "Ger40", "GER40", "UK100",
+              "GOLD", "SILVER", "XAUUSD", "XAGUSD"}
+    if symbol in NON_FX or len(symbol) < 6:
         return {"score": 0.0}
 
     base  = symbol[:3].upper()
@@ -350,8 +355,14 @@ def compute_dxy_score(symbol: str, prices: dict) -> dict:
             reason.append(f"DXY={dxy:.1f} → USD moderado")
 
     # Inverter para pares onde USD é moeda base (USDJPY, USDCHF, USDCAD)
-    base = symbol[:3].upper()
-    if base == "USD":
+    # Índices e metais: USD forte → pressão sobre GOLD; neutro para Usa500
+    NON_FX = {"Usa500", "US500", "US100", "Ger40", "GER40", "UK100",
+              "GOLD", "SILVER", "XAUUSD", "XAGUSD"}
+    if symbol in ("GOLD", "XAUUSD", "SILVER", "XAGUSD"):
+        pass  # DXY forte → negativo para ouro/prata (manter score como está)
+    elif symbol in NON_FX:
+        score = score * 0.3  # impacto reduzido em índices
+    elif symbol[:3].upper() == "USD":
         score = -score
 
     return {
@@ -376,9 +387,14 @@ SYMBOL_KEYWORDS = {
     "USDCHF": ["USD CHF", "swiss franc", "SNB", "safe haven"],
     "USDCAD": ["USD CAD", "canadian dollar", "BOC", "oil price"],
     "XAUUSD": ["gold price", "gold USD", "safe haven", "inflation"],
+    "GOLD":   ["gold price", "gold USD", "safe haven", "inflation"],
+    "SILVER": ["silver price", "silver USD", "precious metals"],
     "US500":  ["S&P 500", "SPX", "Fed rate", "US economy", "earnings"],
+    "Usa500": ["S&P 500", "SPX", "Fed rate", "US economy", "earnings"],
     "US100":  ["Nasdaq", "tech stocks", "Fed rate", "AI earnings"],
     "GER40":  ["DAX", "Germany GDP", "ECB", "euro zone"],
+    "Ger40":  ["DAX", "Germany GDP", "ECB", "euro zone"],
+    "UK100":  ["FTSE", "UK economy", "Bank of England", "pound"],
 }
 
 POSITIVE_WORDS = [
