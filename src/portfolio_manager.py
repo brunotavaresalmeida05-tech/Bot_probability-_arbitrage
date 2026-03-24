@@ -42,6 +42,15 @@ PAIR_CORRELATIONS = {
     ("Ger40",  "UK100"):   +0.75,
     ("Usa500", "EURUSD"):  +0.30,
     ("Usa500", "USDJPY"):  +0.45,
+    # Crypto
+    ("BTCUSD", "ETHUSD"):  +0.85,
+    ("BTCUSD", "SOLUSD"):  +0.80,
+    ("BTCUSD", "XRPUSD"):  +0.70,
+    ("ETHUSD", "SOLUSD"):  +0.75,
+    ("ETHUSD", "XRPUSD"):  +0.65,
+    ("SOLUSD", "XRPUSD"):  +0.60,
+    ("BTCUSD", "GOLD"):    +0.30,
+    ("BTCUSD", "Usa500"):  +0.50,
 }
 
 # Exposição máxima por moeda (% do saldo)
@@ -74,6 +83,8 @@ def get_currency_exposure(positions: list) -> dict:
         "GER40": ("GER40", "EUR"),  "UK100": ("UK100", "GBP"),
         "GOLD": ("XAU", "USD"),     "XAUUSD": ("XAU", "USD"),
         "SILVER": ("XAG", "USD"),   "XAGUSD": ("XAG", "USD"),
+        "BTCUSD": ("BTC", "USD"),   "ETHUSD": ("ETH", "USD"),
+        "SOLUSD": ("SOL", "USD"),   "XRPUSD": ("XRP", "USD"),
     }
 
     for pos in positions:

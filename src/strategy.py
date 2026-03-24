@@ -103,8 +103,19 @@ def is_within_session() -> bool:
     return True
 
 
+def _get_spread_limit(symbol: str) -> float:
+    """Devolve o limite de spread adequado à classe do activo."""
+    if symbol in ("Usa500", "Ger40", "UK100", "US500", "GER40", "US100"):
+        return cfg.MAX_SPREAD_INDEX
+    if symbol in ("GOLD", "SILVER", "XAUUSD", "XAGUSD"):
+        return cfg.MAX_SPREAD_METAL
+    if symbol in ("BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"):
+        return cfg.MAX_SPREAD_CRYPTO
+    return cfg.MAX_SPREAD_FX
+
+
 def spread_ok(symbol: str) -> bool:
-    return mt5c.get_spread_points(symbol) <= cfg.MAX_SPREAD_POINTS
+    return mt5c.get_spread_points(symbol) <= _get_spread_limit(symbol)
 
 
 def atr_sanity_ok(atr_last: float, atr_base_last: float) -> bool:

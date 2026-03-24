@@ -101,9 +101,10 @@ def compute_carry_score(symbol: str) -> dict:
     result = {"score": 0.0, "rate_base": None, "rate_quote": None,
               "differential": None, "signal": None}
 
-    # Índices e metais não têm carry trade FX
+    # Índices, metais e crypto não têm carry trade FX
     NON_FX = {"Usa500", "US500", "US100", "Ger40", "GER40", "UK100",
-              "GOLD", "SILVER", "XAUUSD", "XAGUSD"}
+              "GOLD", "SILVER", "XAUUSD", "XAGUSD",
+              "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"}
     if symbol in NON_FX or len(symbol) < 6:
         return result
 
@@ -256,7 +257,8 @@ def compute_cb_stance(currency: str) -> dict:
 def compute_monetary_score(symbol: str) -> dict:
     """Score de política monetária para um par FX."""
     NON_FX = {"Usa500", "US500", "US100", "Ger40", "GER40", "UK100",
-              "GOLD", "SILVER", "XAUUSD", "XAGUSD"}
+              "GOLD", "SILVER", "XAUUSD", "XAGUSD",
+              "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"}
     if symbol in NON_FX or len(symbol) < 6:
         return {"score": 0.0}
 
@@ -357,7 +359,8 @@ def compute_dxy_score(symbol: str, prices: dict) -> dict:
     # Inverter para pares onde USD é moeda base (USDJPY, USDCHF, USDCAD)
     # Índices e metais: USD forte → pressão sobre GOLD; neutro para Usa500
     NON_FX = {"Usa500", "US500", "US100", "Ger40", "GER40", "UK100",
-              "GOLD", "SILVER", "XAUUSD", "XAGUSD"}
+              "GOLD", "SILVER", "XAUUSD", "XAGUSD",
+              "BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD"}
     if symbol in ("GOLD", "XAUUSD", "SILVER", "XAGUSD"):
         pass  # DXY forte → negativo para ouro/prata (manter score como está)
     elif symbol in NON_FX:
@@ -395,6 +398,10 @@ SYMBOL_KEYWORDS = {
     "GER40":  ["DAX", "Germany GDP", "ECB", "euro zone"],
     "Ger40":  ["DAX", "Germany GDP", "ECB", "euro zone"],
     "UK100":  ["FTSE", "UK economy", "Bank of England", "pound"],
+    "BTCUSD": ["bitcoin", "BTC", "crypto", "halving", "SEC crypto"],
+    "ETHUSD": ["ethereum", "ETH", "crypto", "DeFi", "Ethereum upgrade"],
+    "SOLUSD": ["solana", "SOL", "crypto", "DeFi", "Solana network"],
+    "XRPUSD": ["ripple", "XRP", "crypto", "SEC Ripple", "cross-border"],
 }
 
 POSITIVE_WORDS = [
