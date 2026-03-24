@@ -3,21 +3,21 @@
 # ============================================================
 
 # --- MT5 ---------------------------------------------------
-MT5_PATH     = r"C:\Program Files\MetaTrader 5 - ActivTrades\terminal64.exe"
-MT5_LOGIN    = 6212361
-MT5_PASSWORD = "AZZmmp5?"
-MT5_SERVER   = "ActivTradesCorp-Server"
+MT5_PATH     = r"C:\Program Files\MetaTrader 5\terminal64.exe"
+MT5_LOGIN    = 0
+MT5_PASSWORD = "COLOCA_AQUI"
+MT5_SERVER   = "COLOCA_AQUI"
 
 # --- API Keys ----------------------------------------------
-FRED_API_KEY      = "583922c6e7d2a106ee1eae29a70b90e0"
-POLYGON_KEY       = "2nC3wlQs0AVj8wF3kgT5jcyCNiIaB2iB"
-ALPHA_VANTAGE_KEY = "71K9P6F0RGLHYD39"
+FRED_API_KEY      = "COLOCA_AQUI"
+POLYGON_KEY       = "COLOCA_AQUI"
+ALPHA_VANTAGE_KEY = "COLOCA_AQUI"
 NEWSAPI_KEY       = ""
-FINNHUB_KEY       = "d6uquh1r01qig545jabgd6uquh1r01qig545jac0"
-MARKETAUX_KEY     = "Bc02zKl6R48yom6AtBEfSgMTBj9WMjM1jrRTGHVY"
-CURRENTS_KEY      = "p1ZOufwZzjpunAkPmVDqYU5-Q0Q7XFl_sWRr9rFW5f1bc7Gs"
-MEDIASTACK_KEY    = "fccc2bb417afb7ec2b7a79d6d98100de"
-EODHD_KEY         = "69bdafa2818c60.63828076"
+FINNHUB_KEY       = "COLOCA_AQUI"
+MARKETAUX_KEY     = "COLOCA_AQUI"
+CURRENTS_KEY      = "COLOCA_AQUI"
+MEDIASTACK_KEY    = "COLOCA_AQUI"
+EODHD_KEY         = "COLOCA_AQUI"
 
 # --- Fontes de dados ----------------------------------------
 USE_POLYGON_DATA  = False   # plano free não tem intraday
