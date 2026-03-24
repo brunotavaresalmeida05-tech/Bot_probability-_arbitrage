@@ -253,7 +253,7 @@
 
   .trade-row {
     display: grid;
-    grid-template-columns: 140px 80px 80px 100px 100px 90px 1fr;
+    grid-template-columns: 100px 80px 70px 100px 100px 60px 70px 100px 1fr;
     padding: 10px 4px;
     border-bottom: 1px solid #1e2530;
     font-size: 12px;
@@ -465,7 +465,7 @@
         <div class="card-title"><div><i data-lucide="unlock"></i> Posições Abertas (MT5)</div></div>
         <div class="trade-row header">
           <div>Hora</div><div>Símbolo</div><div>Dir</div>
-          <div>Entrada</div><div>S/L</div><div>Lots</div><div>P&amp;L</div><div>Tipo</div>
+          <div>Entrada</div><div>S/L</div><div>Lots</div><div>Z-Score</div><div>P&amp;L</div><div>Estrat.</div>
         </div>
         <div id="open-positions-list"></div>
       </div>
@@ -513,6 +513,10 @@
     <section id="positions" class="page-section">
       <div class="card">
         <div class="card-title"><div><i data-lucide="lock"></i> Posições Abertas</div></div>
+        <div class="trade-row header">
+          <div>Hora</div><div>Símbolo</div><div>Dir</div>
+          <div>Entrada</div><div>S/L</div><div>Lots</div><div>Z-Score</div><div>P&amp;L</div><div>Estrat.</div>
+        </div>
         <div id="open-positions-list-only"></div>
       </div>
     </section>
@@ -707,9 +711,13 @@ function render(data) {
     const s = syms[sym], z = parseFloat(s.z), pos = s.position;
     const zPct = isNaN(z) ? 50 : Math.min(Math.max((z / 4 + 0.5) * 100, 0), 100);
     const zColor = isNaN(z) ? '#8b949e' : (z < 0 ? '#3fb950' : '#f85149');
+    
+    // Destaque se houver posição aberta
+    const rowStyle = pos && pos !== '–' ? 'style="background:rgba(63,185,80,0.06)"' : '';
+    
     // Bid/Ask spread display
     const bidAsk = (s.bid && s.ask) ? `<span style="font-size:10px;color:var(--muted)">${s.bid}/${s.ask}</span>` : '';
-    return `<tr>
+    return `<tr ${rowStyle}>
       <td><b>${sym}</b> ${bidAsk}</td>
       <td><div class="z-bar-wrap"><span style="color:${zColor};font-weight:600;min-width:45px">${fmt(z,3)}</span><div class="z-bar-bg"><div class="z-bar-fill" style="left:${z<0?zPct+'%':'50%'};right:${z>=0?(100-zPct)+'%':'50%'};background:${zColor};"></div></div></div></td>
       <td class="live-value">${fmt(s.close)}</td><td>${fmt(s.ma)}</td><td>${fmt(s.spread,1)}</td>
@@ -761,14 +769,20 @@ function renderOpenPositions(pos) {
     elGeral.innerHTML = empty; elOnly.innerHTML = empty;
     return;
   }
-  const html = pos.map(p => `
+  const html = pos.map(p => {
+    const z = p.z_score;
+    const zColor = (z === null || isNaN(z)) ? 'var(--muted)' : (z < 0 ? 'var(--green)' : 'var(--red)');
+    return `
     <div class="trade-row">
       <div style="color:#8b949e">${p.time||'–'}</div><div><b>${p.symbol}</b></div>
       <div><span class="badge badge-${p.type.toLowerCase()}">${p.type}</span></div>
       <div>${fmt(p.entry)}</div><div style="color:#8b949e">${fmt(p.sl)}</div>
-      <div>${p.lots}</div><div class="${(p.profit||0)>=0?'positive':'negative'}"><b>${fmtMoney(p.profit)}</b></div>
-      <div style="color:#8b949e">${p.magic === 20240101 ? 'MR' : p.magic}</div>
-    </div>`).join('');
+      <div>${p.lots}</div>
+      <div style="color:${zColor};font-weight:600">${fmt(z, 3)}</div>
+      <div class="${(p.profit||0)>=0?'positive':'negative'}"><b>${fmtMoney(p.profit)}</b></div>
+      <div style="color:#8b949e">${p.magic === 20240101 ? 'MR' : (p.magic === 20240102 ? 'ARB' : p.magic)}</div>
+    </div>`;
+  }).join('');
   elGeral.innerHTML = html; elOnly.innerHTML = html;
 }
 

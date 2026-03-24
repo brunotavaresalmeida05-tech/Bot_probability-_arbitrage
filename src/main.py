@@ -12,7 +12,10 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Garante que o Python encontra os módulos na pasta src/
+root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
 
 import config.settings as cfg
 import src.mt5_connector as mt5c
@@ -21,11 +24,12 @@ import src.logger as log
 import src.dashboard_server as dash
 import src.arb_runner as arb_runner
 
-# Módulos opcionais — não bloqueiam se falharem
+# Módulos opcionais
 try:
     import src.macro_engine as macro
     _MACRO = True
 except ImportError:
+    print("⚠️ Erro ao importar macro_engine. Filtro macro desativado.")
     _MACRO = False
 
 try:
@@ -105,8 +109,13 @@ def is_new_bar(symbol, df):
 
 
 def get_position_obj(symbol):
+    # Procura Mean Reversion (Base)
     positions = mt5c.get_open_positions(symbol, cfg.MAGIC_NUMBER)
-    return positions[0] if positions else None
+    if positions: return positions[0]
+    # Procura Arbitragem Estatística (Base + 1)
+    positions = mt5c.get_open_positions(symbol, cfg.MAGIC_NUMBER + 1)
+    if positions: return positions[0]
+    return None
 
 
 def get_daily_closed_pnl(symbol):
@@ -172,11 +181,12 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
         macro_allowed = ctx.get("trade_allowed", True)
 
     # Multi-timeframe signal
-    mtf_signal, mtf_confidence = None, 0.0
+    mtf_signal, mtf_confidence, h1_trend = None, 0.0, 0
     if _MTF and cfg.USE_MULTI_TIMEFRAME:
         mtf_result  = mtf.get_mtf_signal(symbol)
         mtf_signal  = mtf_result.get("signal")
         mtf_confidence = mtf_result.get("confidence", 0.0)
+        h1_trend = mtf_result.get("h1_trend", 0)
         if mtf_signal:
             log.info(mtf.format_mtf_summary(mtf_result), symbol)
 
@@ -207,9 +217,27 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
         pos_type = "BUY" if pos.type == 0 else "SELL"
         status["position"] = pos_type
         status["pnl"]      = pos.profit
+        
+        # Se os dados técnicos estão n/a, tentamos recuperar o que é possível (Ponte de Dados)
+        if np.isnan(z_last):
+            # Tenta recuperar de Mean Reversion
+            val = entry_z.get(symbol)
+            # Se não houver, tenta de Arbitragem (usando o dicionário do arb_runner)
+            if val is None:
+                val = arb_runner.arb_entry_z.get(symbol)
+            
+            if val is not None:
+                z_last = val
+                status["z"] = round(z_last, 4)
+            else:
+                status["z"] = "busy"
 
         tick = mt5c.get_tick(symbol)
         current_price = tick.bid if pos_type == "BUY" else tick.ask
+        
+        # Garante que Close não fica em branco se temos uma posição
+        if status.get("close") == "–":
+            status["close"] = round(current_price, 5)
 
         do_exit, reason = False, ""
 
@@ -271,12 +299,28 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
         log.info(f"[dim]MACRO BLOCK: {macro_score:.3f} {macro_regime}[/]", symbol)
         return status
 
-    # Sinal — combinação de Z-score e MTF
+    # Sinal — combinação de Z-score, MTF e Filtro Macro
     z_signal = None
     if not np.isnan(z_last):
         if z_last <= -z_enter and close_last < ma_last:
+            # Filtro Mandatório: Regra de Ouro (EMA 200 H1)
+            if _MTF and cfg.USE_MULTI_TIMEFRAME and h1_trend == -1:
+                log.info(f"🚫 BUY em {symbol} BLOQUEADO: Preço < EMA200 em H1 (Regra de Ouro)", symbol)
+                return status
+            # Filtro Macro Sugerido: BUY permitido se não estiver muito Bearish
+            if _MACRO and macro_score <= -0.2:
+                log.info(f"⚠️ Sinal de BUY em {symbol} BLOQUEADO pelo Macro Score: {macro_score:.3f}", symbol)
+                return status
             z_signal = "BUY"
         elif z_last >= z_enter and close_last > ma_last:
+            # Filtro Mandatório: Regra de Ouro (EMA 200 H1)
+            if _MTF and cfg.USE_MULTI_TIMEFRAME and h1_trend == 1:
+                log.info(f"🚫 SELL em {symbol} BLOQUEADO: Preço > EMA200 em H1 (Regra de Ouro)", symbol)
+                return status
+            # Filtro Macro Sugerido: SELL permitido se não estiver muito Bullish
+            if _MACRO and macro_score >= 0.2:
+                log.info(f"⚠️ Sinal de SELL em {symbol} BLOQUEADO pelo Macro Score: {macro_score:.3f}", symbol)
+                return status
             z_signal = "SELL"
 
     # MTF confirma ou gera sinal independente
@@ -299,21 +343,19 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
     if signal is None:
         return status
 
-    # Portfolio check
+    # Portfolio check unificado (A Barreira Final)
     if _PM and cfg.USE_PORTFOLIO_MANAGER:
         sl_tmp = strat.compute_stop_loss(signal, close_last, ma_last, sd_last, atr_last)
         sl_dist_tmp = abs(close_last - sl_tmp) if sl_tmp > 0 else atr_last * 2
         risk_money_tmp = account_balance * cfg.RISK_PER_TRADE_PCT / 100.0
         base_lots = mt5c.calculate_lot_size(symbol, risk_money_tmp, sl_dist_tmp)
 
-        can_open, pm_reason, adj_lots = pm.can_open_position(
-            symbol, signal, base_lots, account_balance, cfg.MAGIC_NUMBER
+        is_valid, pm_reason = pm.validate_execution(
+            "MEAN_REVERSION", symbol, signal, base_lots, account_balance, cfg.MAGIC_NUMBER
         )
-        if not can_open:
-            log.info(f"[dim]PORTFOLIO BLOCK: {pm_reason}[/]", symbol)
+        if not is_valid:
+            log.info(f"[dim]{pm_reason}[/]", symbol)
             return status
-        if adj_lots != base_lots:
-            log.info(f"[dim]PORTFOLIO: lot ajustado {base_lots}→{adj_lots} | {pm_reason}[/]", symbol)
 
     # Abrir posição
     sl = strat.compute_stop_loss(signal, close_last, ma_last, sd_last, atr_last)
@@ -344,7 +386,7 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
         result = mt5c.send_order(symbol, signal, lots, sl, 0.0, cfg.MAGIC_NUMBER, "MR")
         if result["success"]:
             ticket = result["ticket"]
-            entry_z[ticket]   = z_last
+            entry_z[symbol]   = z_last  # Agora usando o símbolo como chave
             entry_atr[ticket] = atr_last
             state.trades_today += 1
             status["position"] = signal

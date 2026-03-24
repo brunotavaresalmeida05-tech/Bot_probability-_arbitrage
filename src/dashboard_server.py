@@ -124,6 +124,10 @@ def _refresh_positions():
         if positions is None:
             positions = []
 
+        # Snapshot local dos Z-scores para evitar lock contention no loop
+        with _lock:
+            z_map = {sym: data.get("z") for sym, data in _store["symbols"].items()}
+
         rows = []
         for p in positions:
             rows.append(
@@ -139,6 +143,7 @@ def _refresh_positions():
                     "magic": p.magic,
                     "comment": p.comment,
                     "time": datetime.fromtimestamp(p.time).strftime("%H:%M:%S"),
+                    "z_score": z_map.get(p.symbol),  # ← Adicionado para o dashboard
                 }
             )
 
@@ -174,7 +179,25 @@ def add_trade(trade: dict):
 
 def get_snapshot() -> dict:
     with _lock:
-        return json.loads(json.dumps(_store))
+        # Criar uma cópia profunda para não interferir com o estado real durante a "ponte"
+        temp_store = json.loads(json.dumps(_store))
+        
+        # Lógica de Ponte: "Esmagar" n/a com dados de posições abertas
+        open_pos = temp_store.get("open_positions", [])
+        symbols_data = temp_store.get("symbols", {})
+        
+        for pos in open_pos:
+            sym = pos["symbol"]
+            if sym in symbols_data:
+                # Se o Z-Score técnico estiver nulo ou ausente, usa o da posição
+                if symbols_data[sym].get("z") is None:
+                    symbols_data[sym]["z"] = pos.get("z_score")
+                
+                # Garante que o preço e P&L estão sincronizados para o dashboard
+                symbols_data[sym]["pnl"] = pos.get("profit")
+                symbols_data[sym]["position"] = pos.get("type")
+        
+        return temp_store
 
 
 # ─────────────────────────────────────────────

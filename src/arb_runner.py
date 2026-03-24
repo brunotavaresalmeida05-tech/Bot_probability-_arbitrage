@@ -23,6 +23,7 @@ _last_discovery: float = 0.0
 DISCOVERY_INTERVAL = 3600  # redescobre a cada hora
 
 arb_positions: dict = {}
+arb_entry_z: dict = {}
 
 
 def _get_all_bars(symbols: list) -> dict:
@@ -197,7 +198,9 @@ def _open_arb_position(symbol, direction, score, reason, df, balance):
             comment=f"ARB_{direction[:1]}",
         )
         if result["success"]:
-            log.success(f"ARB posição aberta: ticket={result['ticket']}", symbol)
+            ticket = result["ticket"]
+            arb_entry_z[symbol] = score  # Guardar Z-score de entrada usando o símbolo como chave
+            log.success(f"ARB posição aberta: ticket={ticket}", symbol)
         else:
             log.error(f"ARB falhou: {result.get('error')}", symbol)
     else:

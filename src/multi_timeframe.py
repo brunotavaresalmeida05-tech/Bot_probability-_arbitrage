@@ -86,6 +86,26 @@ def _get_tf_signal(symbol: str, timeframe: str, tf_cfg: dict) -> dict:
     return result
 
 
+def get_h1_trend_filter(symbol: str) -> int:
+    """
+    Regra de Ouro: Retorna 1 (Bullish), -1 (Bearish), 0 (Erro/Neutral)
+    Baseado na EMA 200 do timeframe H1.
+    """
+    df_h1 = mt5c.get_bars(symbol, "H1", 210)
+    if df_h1 is None or len(df_h1) < 200:
+        return 0
+    
+    close = df_h1["close"]
+    ema_200 = close.ewm(span=200, adjust=False).mean().iloc[-1]
+    current_price = close.iloc[-1]
+    
+    if current_price > ema_200:
+        return 1  # Somente BUY permitido
+    elif current_price < ema_200:
+        return -1 # Somente SELL permitido
+    return 0
+
+
 def get_mtf_signal(symbol: str) -> dict:
     """
     Analisa os 3 timeframes e devolve sinal combinado.
@@ -107,6 +127,7 @@ def get_mtf_signal(symbol: str) -> dict:
         "details":    {},
         "reason":     "",
         "mtf_score":  0.0,
+        "h1_trend":   0,
     }
 
     tf_signals = {}
@@ -143,12 +164,26 @@ def get_mtf_signal(symbol: str) -> dict:
 
     result["mtf_score"] = round(buy_score - sell_score, 4)
 
+    # Filtro Mandatório: Regra de Ouro (EMA 200 em H1)
+    h1_trend = get_h1_trend_filter(symbol)
+    result["h1_trend"] = h1_trend
+    
+    if h1_trend == 1 and sell_score > buy_score:
+        result["reason"] = f"SELL BLOQUEADO: Preço > EMA200 em H1 (Regra de Ouro)"
+        return result
+    elif h1_trend == -1 and buy_score > sell_score:
+        result["reason"] = f"BUY BLOQUEADO: Preço < EMA200 em H1 (Regra de Ouro)"
+        return result
+
     # Sinal final: só entra se pelo menos 2 TFs concordam
-    # E o D1 não contradiz (regime)
     buy_tfs  = [tf for tf, s in tf_signals.items() if s.get("signal") == "BUY"]
     sell_tfs = [tf for tf, s in tf_signals.items() if s.get("signal") == "SELL"]
 
     if len(buy_tfs) >= 2 and buy_score > sell_score:
+        # Filtro Adicional Regra de Ouro
+        if h1_trend == -1:
+            result["reason"] = "BUY Bloqueado por H1 EMA 200 (Bearish)"
+            return result
         # Verificar que D1 não está em tendência de baixa forte
         if d1_trend != "down" or d1.get("z", 0) > -1.5:
             result["signal"]     = "BUY"
@@ -157,6 +192,10 @@ def get_mtf_signal(symbol: str) -> dict:
             result["reason"]     = " | ".join(reasons)
 
     elif len(sell_tfs) >= 2 and sell_score > buy_score:
+        # Filtro Adicional Regra de Ouro
+        if h1_trend == 1:
+            result["reason"] = "SELL Bloqueado por H1 EMA 200 (Bullish)"
+            return result
         # Verificar que D1 não está em tendência de alta forte
         if d1_trend != "up" or d1.get("z", 0) < 1.5:
             result["signal"]     = "SELL"

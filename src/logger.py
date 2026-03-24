@@ -12,6 +12,7 @@ from rich.panel import Panel
 from rich import box
 import sys
 import io
+import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config.settings import CSV_LOG_FILE, LOG_DIR
@@ -116,8 +117,17 @@ def print_status_table(rows: list):
 
     for r in rows:
         z     = r.get("z", float("nan"))
-        z_str = f"{z:+.3f}" if z == z else "n/a"
-        z_color = "green" if z < -1 else ("red" if z > 1 else "white")
+        
+        # Lógica de cor e texto para Z-score
+        if z == "busy":
+            z_str = "[italic yellow]busy[/]"
+            z_color = "yellow"
+        elif isinstance(z, (int, float)):
+            z_str = f"{z:+.3f}" if z == z else "n/a"
+            z_color = "green" if (not np.isnan(z) and z < -1) else ("red" if (not np.isnan(z) and z > 1) else "white")
+        else:
+            z_str = str(z)
+            z_color = "white"
 
         sig   = r.get("signal", "-")
         sig_str = (

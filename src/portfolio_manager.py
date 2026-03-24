@@ -59,6 +59,32 @@ MAX_CURRENCY_EXPOSURE_PCT = 3.0
 MAX_TOTAL_RISK_PCT = 6.0
 # Correlação máxima entre posições novas e existentes
 MAX_CORR_THRESHOLD = 0.70
+# Proteção Global: fechar tudo se drawdown atingir este limite (% do saldo)
+GLOBAL_DRAWDOWN_LIMIT_PCT = 5.0
+
+
+def check_global_drawdown_protector(magic: int = None) -> tuple[bool, str]:
+    """
+    Proteção Global: Se a soma das perdas flutuantes de todas as posições
+    atingir o limite (ex: -5%), o bot fecha tudo.
+    Retorna: (está_em_segurança, motivo_se_não)
+    """
+    account = mt5c.get_account_info()
+    balance = account.get("balance", 0.0)
+    equity  = account.get("equity", 0.0)
+    
+    if balance <= 0:
+        return True, "Saldo zero"
+        
+    drawdown_pct = ((balance - equity) / balance) * 100
+    
+    if drawdown_pct >= GLOBAL_DRAWDOWN_LIMIT_PCT:
+        msg = f"⛔ DRAWDOWN GLOBAL ATINGIDO: {drawdown_pct:.2f}% (Limite: {GLOBAL_DRAWDOWN_LIMIT_PCT}%)"
+        # Fecha todas as posições (chamando o conector)
+        mt5c.close_all_positions(magic=magic)
+        return False, msg
+        
+    return True, "ok"
 
 
 def get_correlation(sym_a: str, sym_b: str) -> float:
@@ -167,6 +193,64 @@ def get_portfolio_correlation(new_symbol: str, new_direction: str,
     }
 
 
+def get_currency_exposure_financial(positions: list, balance: float) -> dict:
+    """
+    Calcula exposição por moeda em VALOR FINANCEIRO (% do saldo).
+    Retorna dict: {currency: exposure_pct}
+    """
+    if balance <= 0: return {}
+    
+    lots_exposure = get_currency_exposure(positions)
+    financial_exposure = {}
+    
+    for ccy, lots in lots_exposure.items():
+        # Aproximação: assume alavancagem 100:1 e valor nominal ~100k por lote
+        # Em produção, mt5c.calculate_nominal_value seria ideal
+        nominal_value = abs(lots) * 100000 
+        exposure_pct = (nominal_value / balance) * 100
+        financial_exposure[ccy] = round(exposure_pct, 2)
+        
+    return financial_exposure
+
+
+def has_sufficient_margin(symbol: str, lots: float, balance: float) -> bool:
+    """
+    Verifica se a conta tem margem livre suficiente para abrir a posição.
+    """
+    account = mt5c.get_account_info()
+    free_margin = account.get("margin_free", 0.0)
+    
+    # Estimativa simples de margem necessária (baseada em alavancagem 1:100)
+    # Em produção, mt5.order_check() seria usado para precisão absoluta.
+    margin_required = (lots * 100000) / 100.0 # Ex: 1 lote EURUSD = 1000 EUR de margem
+    
+    return free_margin > (margin_required * 1.2) # 20% de buffer de segurança
+
+
+def validate_execution(
+    strategy_type: str,
+    symbol: str,
+    direction: str,
+    lots: float,
+    balance: float,
+    magic: int = None
+) -> tuple[bool, str]:
+    """
+    A ÚLTIMA BARREIRA antes do MetaTrader 5.
+    Integra Drawdown, Correlação, Exposição e Margem.
+    """
+    # 1. Validar via regras de portfólio (Drawdown, Correlação, Exposição)
+    can_open, reason, _ = can_open_position(symbol, direction, lots, balance, magic)
+    if not can_open:
+        return False, f"PORTFOLIO BLOCK: {reason}"
+        
+    # 2. Validar Margem
+    if not has_sufficient_margin(symbol, lots, balance):
+        return False, "MARGIN BLOCK: Margem livre insuficiente para esta operação"
+        
+    return True, "ok"
+
+
 def can_open_position(
     symbol: str,
     direction: str,
@@ -176,13 +260,12 @@ def can_open_position(
 ) -> tuple[bool, str, float]:
     """
     Verifica se pode abrir nova posição do ponto de vista do portfólio.
-    Retorna: (pode_abrir, motivo, lot_ajustado)
-
-    Checks:
-    1. Risco total não excede MAX_TOTAL_RISK_PCT
-    2. Exposição por moeda não excede MAX_CURRENCY_EXPOSURE_PCT
-    3. Correlação com posições existentes não excede MAX_CORR_THRESHOLD
     """
+    # 0. Check Proteção Global (Drawdown)
+    safe, msg = check_global_drawdown_protector(magic)
+    if not safe:
+        return False, msg, 0.0
+
     positions = mt5c.get_open_positions(magic=magic) if magic else mt5c.get_open_positions()
 
     # 1. Risco total
@@ -190,26 +273,22 @@ def can_open_position(
     if current_risk >= MAX_TOTAL_RISK_PCT:
         return False, f"Risco total={current_risk:.2f}% ≥ {MAX_TOTAL_RISK_PCT}%", 0.0
 
-    # 2. Correlação
+    # 2. Correlação (Matriz em Tempo Real)
     corr_check = get_portfolio_correlation(symbol, direction, positions)
     if corr_check["is_too_correlated"]:
         conflicts = corr_check["conflicts"]
-        msg = f"Alta correlação ({corr_check['max_correlation']:.2f}) com: " + \
-              ", ".join(f"{c['symbol']}({c['direction']})" for c in conflicts[:3])
-        # Não bloqueia, mas reduz lot
-        adj_lots = round(lots * (1.0 - corr_check["max_correlation"] * 0.5), 2)
-        return True, f"⚠ {msg} → lot reduzido para {adj_lots}", adj_lots
+        msg = f"Risco de Correlação: {symbol} muito ligado a " + \
+              ", ".join(f"{c['symbol']}({c['effective']:.2f})" for c in conflicts[:2])
+        return False, msg, 0.0
 
-    # 3. Exposição por moeda
-    if len(symbol) >= 6:
-        base  = symbol[:3].upper()
-        quote = symbol[3:6].upper()
-        exposure = get_currency_exposure(positions)
-
-        for ccy in [base, quote]:
-            current_exp = abs(exposure.get(ccy, 0.0))
-            if current_exp > MAX_CURRENCY_EXPOSURE_PCT / 100 * balance:
-                return False, f"Exposição {ccy} = {current_exp:.2f} lotes já no limite", 0.0
+    # 3. Exposição por moeda (% do Saldo)
+    exposure_pct = get_currency_exposure_financial(positions, balance)
+    base = symbol[:3].upper() if len(symbol) >= 6 else symbol
+    quote = symbol[3:6].upper() if len(symbol) >= 6 else "USD"
+    
+    for ccy in [base, quote]:
+        if exposure_pct.get(ccy, 0) >= MAX_CURRENCY_EXPOSURE_PCT:
+            return False, f"Exposição {ccy} ({exposure_pct[ccy]}%) atingiu o limite ({MAX_CURRENCY_EXPOSURE_PCT}%)", 0.0
 
     return True, "ok", lots
 

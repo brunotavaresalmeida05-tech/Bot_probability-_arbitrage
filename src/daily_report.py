@@ -155,6 +155,10 @@ def generate_daily_report(
     trades = _read_today_trades()
     stats = _compute_daily_stats(trades)
     macro = _get_macro_summary()
+    global_macro_score = sum(m.get("score", 0) for m in macro.values()) / len(macro) if macro else 0.0
+    global_macro_label = "Bullish" if global_macro_score > 0.1 else ("Bearish" if global_macro_score < -0.1 else "Neutral")
+    global_macro_class = "pos" if global_macro_score > 0.1 else ("neg" if global_macro_score < -0.1 else "neu")
+
     portfolio = _get_portfolio_summary()
     account = account or _get_account_info()
 
@@ -279,6 +283,8 @@ Saldo: {account.get('balance',0):.2f} {account.get('currency','')}</p>
 <div class="cards">
     <div class="card"><div class="card-label">P&amp;L do Dia</div>
         <div class="card-value {pnl_class}">{pnl_sign}{stats['pnl_total']:.2f}</div></div>
+    <div class="card"><div class="card-label">Macro Global</div>
+        <div class="card-value {global_macro_class}">{global_macro_score:+.2f} ({global_macro_label})</div></div>
     <div class="card"><div class="card-label">Trades</div>
         <div class="card-value neu">{stats['n_trades']}</div></div>
     <div class="card"><div class="card-label">Win Rate</div>
