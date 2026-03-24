@@ -68,7 +68,9 @@ def calc_triangle_profit(prices: dict, a: str, b: str, c: str, op: str) -> dict:
     Retorna: profit_pct, direction, costs_pct
     """
     if a not in prices or b not in prices or c not in prices:
-        return {"profit": 0.0, "direction": None, "viable": False}
+        return {"profit": 0.0, "profit_pips": 0.0, "direction": None,
+                "deviation": 0.0, "spread_cost": 0.0, "net_profit": 0.0,
+                "viable": False, "synthetic": 0.0, "actual": 0.0}
 
     pa = prices[a]
     pb = prices[b]

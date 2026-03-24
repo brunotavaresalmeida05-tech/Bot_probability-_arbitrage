@@ -196,7 +196,7 @@ def close_position(position, magic, deviation=20):
         return {"success": False, "error": "no tick"}
 
     close_type = mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
-    price      = tick.bid if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_ASK
+    price      = tick.bid if position.type == mt5.ORDER_TYPE_BUY else tick.ask
 
     request = {
         "action":       mt5.TRADE_ACTION_DEAL,
