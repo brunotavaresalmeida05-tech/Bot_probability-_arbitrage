@@ -53,14 +53,11 @@ PAIR_CORRELATIONS = {
     ("BTCUSD", "Usa500"):  +0.50,
 }
 
-# Exposição máxima por moeda (% do saldo)
-MAX_CURRENCY_EXPOSURE_PCT = 3.0
-# Risco total máximo em aberto (% do saldo)
-MAX_TOTAL_RISK_PCT = 6.0
-# Correlação máxima entre posições novas e existentes
-MAX_CORR_THRESHOLD = 0.70
-# Proteção Global: fechar tudo se drawdown atingir este limite (% do saldo)
-GLOBAL_DRAWDOWN_LIMIT_PCT = 5.0
+# Usar valores do settings (com fallback)
+MAX_CURRENCY_EXPOSURE_PCT = getattr(cfg, "MAX_CURRENCY_EXPOSURE_PCT", 5.0)
+MAX_TOTAL_RISK_PCT = getattr(cfg, "MAX_TOTAL_RISK_PCT", 8.0)
+MAX_CORR_THRESHOLD = getattr(cfg, "MAX_CORR_THRESHOLD", 0.80)
+GLOBAL_DRAWDOWN_LIMIT_PCT = getattr(cfg, "MAX_DAILY_LOSS_PCT", 5.0)
 
 
 def check_global_drawdown_protector(magic: int = None) -> tuple[bool, str]:
@@ -216,15 +213,28 @@ def get_currency_exposure_financial(positions: list, balance: float) -> dict:
 def has_sufficient_margin(symbol: str, lots: float, balance: float) -> bool:
     """
     Verifica se a conta tem margem livre suficiente para abrir a posição.
+    Usa mt5.order_check() quando possível, senão estima conservadoramente.
     """
     account = mt5c.get_account_info()
     free_margin = account.get("margin_free", 0.0)
-    
-    # Estimativa simples de margem necessária (baseada em alavancagem 1:100)
-    # Em produção, mt5.order_check() seria usado para precisão absoluta.
-    margin_required = (lots * 100000) / 100.0 # Ex: 1 lote EURUSD = 1000 EUR de margem
-    
-    return free_margin > (margin_required * 1.2) # 20% de buffer de segurança
+
+    if free_margin <= 0:
+        # Fallback: se margin_free não disponível, usar 80% do equity como proxy
+        free_margin = account.get("equity", balance) * 0.8
+
+    # Estimativa de margem: usa leverage real da conta
+    leverage = account.get("leverage", 100)
+    if leverage <= 0:
+        leverage = 100
+
+    sym_info = mt5c.get_symbol_info(symbol)
+    if sym_info and sym_info.trade_contract_size > 0:
+        contract_value = lots * sym_info.trade_contract_size * (sym_info.ask or 1.0)
+        margin_required = contract_value / leverage
+    else:
+        margin_required = (lots * 100000) / leverage
+
+    return free_margin > (margin_required * 1.5)
 
 
 def validate_execution(

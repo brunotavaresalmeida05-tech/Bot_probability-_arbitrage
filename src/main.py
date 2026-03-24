@@ -74,6 +74,7 @@ daily_states:  dict = {}
 entry_z:       dict = {}
 entry_atr:     dict = {}
 _bars_cache:   dict = {}
+_last_status:  dict = {}   # cache de último status por símbolo
 PAPER_MODE = False
 
 
@@ -141,6 +142,12 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
     _bars_cache[symbol] = df
 
     if not is_new_bar(symbol, df):
+        # Reutilizar último status conhecido (Z, close, MA, spread)
+        cached = _last_status.get(symbol, {})
+        status["z"]      = cached.get("z", float("nan"))
+        status["close"]  = cached.get("close", "–")
+        status["ma"]     = cached.get("ma", "–")
+        status["spread"] = cached.get("spread", "–")
         pos = get_position_obj(symbol)
         if pos:
             status["position"] = "BUY" if pos.type == 0 else "SELL"
@@ -168,6 +175,8 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
         "ma":     round(ma_last, 5),
         "spread": round(spread, 1),
     })
+    # Guardar para uso entre candles
+    _last_status[symbol] = {k: status[k] for k in ("z", "close", "ma", "spread")}
 
     # Macro context
     macro_score, macro_regime, macro_reasons = 0.0, "neutral", []
@@ -303,39 +312,32 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
     z_signal = None
     if not np.isnan(z_last):
         if z_last <= -z_enter and close_last < ma_last:
-            # Filtro Mandatório: Regra de Ouro (EMA 200 H1)
-            if _MTF and cfg.USE_MULTI_TIMEFRAME and h1_trend == -1:
-                log.info(f"🚫 BUY em {symbol} BLOQUEADO: Preço < EMA200 em H1 (Regra de Ouro)", symbol)
-                return status
-            # Filtro Macro Sugerido: BUY permitido se não estiver muito Bearish
-            if _MACRO and macro_score <= -0.2:
-                log.info(f"⚠️ Sinal de BUY em {symbol} BLOQUEADO pelo Macro Score: {macro_score:.3f}", symbol)
+            # Macro: só bloqueia em score muito adverso (< -0.5)
+            if _MACRO and macro_score <= -0.5:
+                log.info(f"[dim]BUY {symbol} bloqueado: macro={macro_score:.3f}[/]", symbol)
                 return status
             z_signal = "BUY"
         elif z_last >= z_enter and close_last > ma_last:
-            # Filtro Mandatório: Regra de Ouro (EMA 200 H1)
-            if _MTF and cfg.USE_MULTI_TIMEFRAME and h1_trend == 1:
-                log.info(f"🚫 SELL em {symbol} BLOQUEADO: Preço > EMA200 em H1 (Regra de Ouro)", symbol)
-                return status
-            # Filtro Macro Sugerido: SELL permitido se não estiver muito Bullish
-            if _MACRO and macro_score >= 0.2:
-                log.info(f"⚠️ Sinal de SELL em {symbol} BLOQUEADO pelo Macro Score: {macro_score:.3f}", symbol)
+            # Macro: só bloqueia em score muito adverso (> +0.5)
+            if _MACRO and macro_score >= 0.5:
+                log.info(f"[dim]SELL {symbol} bloqueado: macro={macro_score:.3f}[/]", symbol)
                 return status
             z_signal = "SELL"
 
-    # MTF confirma ou gera sinal independente
+    # MTF confirma ou ajusta — Z-score é o sinal primário
     if _MTF and cfg.USE_MULTI_TIMEFRAME and mtf_signal:
         if z_signal == mtf_signal:
-            # Ambos concordam — sinal forte
+            # Ambos concordam — sinal forte, boost de lote
             signal     = z_signal
             lot_mult  *= (1.0 + mtf_confidence * 0.3)
             log.info(f"MTF+Z concordam: {signal} (conf={mtf_confidence:.2f})", symbol)
         elif z_signal and mtf_signal and z_signal != mtf_signal:
-            # Discordam — não entrar
-            log.info(f"[dim]MTF({mtf_signal}) ≠ Z({z_signal}) → skip[/]", symbol)
-            return status
+            # Discordam — usar Z mas reduzir lote (mean reversion é contrária à tendência)
+            signal = z_signal
+            lot_mult *= 0.7
+            log.info(f"[dim]MTF({mtf_signal}) ≠ Z({z_signal}) → Z com lote reduzido[/]", symbol)
         else:
-            signal = z_signal  # só Z disponível
+            signal = z_signal or mtf_signal
     else:
         signal = z_signal
 
@@ -412,8 +414,17 @@ def run(mode: str):
         log.error("Não foi possível ligar ao MT5.")
         sys.exit(1)
 
-    # Todos os símbolos activos (FX + índices + metais)
-    active_symbols = cfg.ALL_SYMBOLS
+    # Validar quais símbolos existem no broker
+    active_symbols = []
+    for sym in cfg.ALL_SYMBOLS:
+        info = mt5c.get_symbol_info(sym)
+        if info is not None and info.trade_mode != 0:
+            active_symbols.append(sym)
+        else:
+            log.warning(f"Símbolo {sym} não disponível no broker — removido")
+    if not active_symbols:
+        log.error("Nenhum símbolo disponível. Verifica config/settings.py")
+        sys.exit(1)
 
     account = mt5c.get_account_info()
     log.print_header(active_symbols, account)

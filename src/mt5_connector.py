@@ -40,6 +40,7 @@ def get_account_info() -> dict:
     if info is None:
         return {}
     return {"balance": info.balance, "equity": info.equity, "margin": info.margin,
+            "margin_free": info.margin_free, "leverage": info.leverage,
             "currency": info.currency, "server": info.server, "login": info.login}
 
 
@@ -188,6 +189,16 @@ def send_order(symbol, order_type, lots, sl, tp, magic, comment="MR", deviation=
     if result.retcode == mt5.TRADE_RETCODE_DONE:
         return {"success": True, "ticket": result.order, "price": result.price, "volume": result.volume}
     return {"success": False, "retcode": result.retcode, "error": result.comment}
+
+
+def close_all_positions(magic: int = None, deviation: int = 20) -> list:
+    """Fecha todas as posições abertas (filtradas por magic se fornecido)."""
+    positions = get_open_positions(magic=magic)
+    results = []
+    for pos in positions:
+        result = close_position(pos, pos.magic, deviation)
+        results.append({"symbol": pos.symbol, "ticket": pos.ticket, **result})
+    return results
 
 
 def close_position(position, magic, deviation=20):

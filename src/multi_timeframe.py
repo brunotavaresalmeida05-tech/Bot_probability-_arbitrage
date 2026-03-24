@@ -164,44 +164,36 @@ def get_mtf_signal(symbol: str) -> dict:
 
     result["mtf_score"] = round(buy_score - sell_score, 4)
 
-    # Filtro Mandatório: Regra de Ouro (EMA 200 em H1)
+    # H1 EMA200 trend — informação, não bloqueio hard
     h1_trend = get_h1_trend_filter(symbol)
     result["h1_trend"] = h1_trend
-    
-    if h1_trend == 1 and sell_score > buy_score:
-        result["reason"] = f"SELL BLOQUEADO: Preço > EMA200 em H1 (Regra de Ouro)"
-        return result
-    elif h1_trend == -1 and buy_score > sell_score:
-        result["reason"] = f"BUY BLOQUEADO: Preço < EMA200 em H1 (Regra de Ouro)"
-        return result
 
-    # Sinal final: só entra se pelo menos 2 TFs concordam
+    # Sinal final: precisa de pelo menos 2 TFs a concordar
     buy_tfs  = [tf for tf, s in tf_signals.items() if s.get("signal") == "BUY"]
     sell_tfs = [tf for tf, s in tf_signals.items() if s.get("signal") == "SELL"]
 
     if len(buy_tfs) >= 2 and buy_score > sell_score:
-        # Filtro Adicional Regra de Ouro
+        # D1 em tendência forte contrária → reduz confiança mas não bloqueia
+        confidence = buy_score
         if h1_trend == -1:
-            result["reason"] = "BUY Bloqueado por H1 EMA 200 (Bearish)"
-            return result
-        # Verificar que D1 não está em tendência de baixa forte
-        if d1_trend != "down" or d1.get("z", 0) > -1.5:
-            result["signal"]     = "BUY"
-            result["agreement"]  = len(buy_tfs)
-            result["confidence"] = round(buy_score, 3)
-            result["reason"]     = " | ".join(reasons)
+            confidence *= 0.6  # penaliza mas permite (mean reversion)
+        if d1_trend == "down" and d1.get("z", 0) < -1.5:
+            confidence *= 0.5
+        result["signal"]     = "BUY"
+        result["agreement"]  = len(buy_tfs)
+        result["confidence"] = round(confidence, 3)
+        result["reason"]     = " | ".join(reasons)
 
     elif len(sell_tfs) >= 2 and sell_score > buy_score:
-        # Filtro Adicional Regra de Ouro
+        confidence = sell_score
         if h1_trend == 1:
-            result["reason"] = "SELL Bloqueado por H1 EMA 200 (Bullish)"
-            return result
-        # Verificar que D1 não está em tendência de alta forte
-        if d1_trend != "up" or d1.get("z", 0) < 1.5:
-            result["signal"]     = "SELL"
-            result["agreement"]  = len(sell_tfs)
-            result["confidence"] = round(sell_score, 3)
-            result["reason"]     = " | ".join(reasons)
+            confidence *= 0.6
+        if d1_trend == "up" and d1.get("z", 0) > 1.5:
+            confidence *= 0.5
+        result["signal"]     = "SELL"
+        result["agreement"]  = len(sell_tfs)
+        result["confidence"] = round(confidence, 3)
+        result["reason"]     = " | ".join(reasons)
 
     else:
         result["reason"] = "TFs em desacordo: " + " | ".join(reasons)
