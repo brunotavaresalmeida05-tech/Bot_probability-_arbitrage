@@ -34,6 +34,7 @@ USE_EODHD         = True
 USE_MULTI_TIMEFRAME  = True    # análise M5+H1+D1
 USE_PORTFOLIO_MANAGER = True   # gestão de correlações
 USE_TRIANGULAR_ARB   = True    # arbitragem triangular FX
+USE_MULTI_STRATEGY   = True    # sistema multi-estratégia (Pairs, Trend, Breakout, etc.)
 
 # --- Símbolos Mean Reversion (FX) --------------------------
 SYMBOLS = [
@@ -72,8 +73,11 @@ MTF_MIN_AGREEMENT = 2                 # mínimo de TFs que devem concordar
 TIMEFRAME = "M5"
 
 # --- Sessão ------------------------------------------------
-SESSION_START_HOUR = 7
-SESSION_END_HOUR   = 22
+SESSION_START_HOUR = 0
+SESSION_END_HOUR   = 24
+
+# Horário 24/7 para crypto
+SYMBOLS_24_7 = ["BTCUSD", "ETHUSD", "XRPUSD", "SOLUSD"]
 
 # --- Parâmetros Mean Reversion ----------------------------
 MA_PERIOD       = 100
@@ -104,7 +108,7 @@ ARB_RISK_PCT         = 0.3
 ARB_SL_ATR_MULT      = 2.0
 
 # --- Arbitragem Triangular ---------------------------------
-TRIANGULAR_ARB_ENABLED  = True
+TRIANGULAR_ARB_ENABLED  = False
 TRIANGULAR_ARB_MIN_PROFIT = 0.0003   # mínimo 0.3 pips de lucro após custos
 TRIANGULAR_ARB_PAPER     = True      # True = só detecta, não executa
 
@@ -142,6 +146,35 @@ MAX_CONSECUTIVE_LOSSES = 5
 
 # --- Filtros -----------------------------------------------
 MAX_SPREAD_POINTS  = 20.0
+
+# Spreads por categoria
+def get_max_spread_for_symbol(symbol):
+    """Spread máximo baseado no tipo de ativo."""
+    symbol_upper = symbol.upper()
+
+    # Crypto: spreads MUITO altos
+    if any(c in symbol_upper for c in ["BTC", "ETH", "XRP", "SOL"]):
+        return 15000.0
+
+    # Índices
+    if any(i in symbol_upper for i in ["US500", "US100", "UK100", "GER40", "JP225"]):
+        return 500.0
+
+    # Metais
+    if any(m in symbol_upper for m in ["XAU", "XAG", "GOLD", "SILVER"]):
+        return 100.0
+
+    # Commodities
+    if any(c in symbol_upper for c in ["OIL", "NGAS", "BRENT", "WTI"]):
+        return 150.0
+
+    # FX Crosses com JPY
+    if "JPY" in symbol_upper:
+        return 30.0
+
+    # FX Majors
+    return 20.0
+
 USE_TIME_FILTER    = True
 NO_TRADE_WINDOW_1  = (0, 0)
 NO_TRADE_WINDOW_2  = (0, 0)
@@ -159,3 +192,326 @@ MAGIC_NUMBER = 20240101  # mean reversion
 
 # --- Loop --------------------------------------------------
 LOOP_INTERVAL_SECONDS = 10
+
+# ============================================================
+#  MULTI-STRATEGY SYSTEM
+# ============================================================
+
+# Estratégias habilitadas
+ENABLED_STRATEGIES = [
+    'pairs',         # Pairs Trading
+    'trend',         # Trend Following
+    'breakout',      # Breakout
+    'volatility',    # Volatility Arbitrage
+    'news'           # News Trading
+]
+
+# Alocação de capital por estratégia (%)
+STRATEGY_ALLOCATION = {
+    'mean_reversion': 10,  # Estratégia existente
+    'pairs': 20,
+    'trend': 25,
+    'breakout': 20,
+    'volatility': 15,
+    'news': 10
+}
+
+# ============================================================
+#  PORTFOLIO ALLOCATION - SISTEMA SEM LIMITES
+# ============================================================
+
+USE_DYNAMIC_ALLOCATION = True  # ⭐ Ativar sistema novo
+
+# Risk total máximo (% do capital)
+MAX_TOTAL_RISK_PCT = 10.0  # 10% do capital em risco total
+
+# Sharpe mínimo para alocar capital
+MIN_SHARPE_THRESHOLD = -2.0  # Permite TODOS operarem (até negativos)
+
+# Método de alocação
+ALLOCATION_METHOD = "sharpe_weighted"  # Ativos melhores = mais capital
+
+# Rebalanceamento automático
+REBALANCE_INTERVAL_HOURS = 24  # Rebalancea a cada 24h
+
+# ============================================================
+#  TODOS OS ATIVOS DISPONÍVEIS (SEM LIMITES!)
+# ============================================================
+
+ALL_AVAILABLE_SYMBOLS = [
+    # ========================================
+    # A. FX MAJORS (7 pares - Alta Liquidez)
+    # ========================================
+    "EURUSD",   # Sharpe 0.84
+    "GBPUSD",   # Sharpe 0.81
+    "USDJPY",   # Sharpe 0.73
+    "AUDUSD",   # Sharpe 1.77 (TOP 4)
+    "USDCHF",   # Sharpe 1.41 (TOP 5)
+    "USDCAD",   # Sharpe 2.54 (TOP 2)
+    "NZDUSD",   # Sharpe -0.21 (fraco mas diversifica)
+
+    # ========================================
+    # B. FX CROSSES (4 pares)
+    # ========================================
+    "EURGBP",   # Sharpe 6.00 (CAMPEÃO!)
+    "EURJPY",   # Sharpe -0.23 (fraco)
+    "GBPJPY",   # Sharpe 2.24 (TOP 3)
+    "AUDJPY",   # Sharpe -0.15 (fraco)
+
+    # ========================================
+    # C. METAIS (2 - Safe Haven)
+    # ========================================
+    "GOLD",     # Sharpe -0.98 (M5), testar H1
+    "SILVER",   # Sharpe -1.15 (M5), testar H1
+
+    # ========================================
+    # D. ÍNDICES (5 - Momentum + Mean Rev)
+    # ========================================
+    "US500",    # S&P 500 (se disponível)
+    "US100",    # Nasdaq (se disponível)
+    "GER40",    # DAX (se disponível)
+    "UK100",    # Sharpe -0.56 (fraco)
+    "JP225",    # Nikkei (se disponível)
+
+    # ========================================
+    # E. COMMODITIES (3 - Macro Driven)
+    # ========================================
+    "USOIL",    # WTI Crude (se disponível)
+    "UKOIL",    # Brent (se disponível)
+    "NGAS",     # Natural Gas (se disponível)
+
+    # ========================================
+    # F. CRYPTO CFD (4 - Alta Volatilidade)
+    # ========================================
+    "BTCUSD",   # Sharpe -0.73 (fraco mas volátil)
+    "ETHUSD",   # Sharpe 0.29 (fraco)
+    "XRPUSD",   # Sharpe 1.07 (BOM!)
+    "SOLUSD",   # Sharpe 0.70 (OK)
+]
+
+# ============================================================
+#  MÉTRICAS DE PERFORMANCE (Atualizar com backtests reais!)
+# ============================================================
+
+ASSET_METRICS = {
+    # ========================================
+    # FX MAJORS (CONFIRMADO via backtest)
+    # ========================================
+    "EURUSD": {
+        "sharpe": 0.84,
+        "win_rate": 0.55,
+        "avg_return_pct": 6.1,
+        "volatility": 0.8,
+        "n_trades": 187
+    },
+    "GBPUSD": {
+        "sharpe": 0.81,
+        "win_rate": 0.54,
+        "avg_return_pct": 5.8,
+        "volatility": 1.0,
+        "n_trades": 186
+    },
+    "USDJPY": {
+        "sharpe": 0.73,
+        "win_rate": 0.52,
+        "avg_return_pct": 5.2,
+        "volatility": 1.1,
+        "n_trades": 249
+    },
+    "AUDUSD": {
+        "sharpe": 1.77,
+        "win_rate": 0.59,
+        "avg_return_pct": 13.7,
+        "volatility": 0.9,
+        "n_trades": 190
+    },
+    "USDCHF": {
+        "sharpe": 1.41,
+        "win_rate": 0.58,
+        "avg_return_pct": 10.1,
+        "volatility": 0.9,
+        "n_trades": 187
+    },
+    "USDCAD": {
+        "sharpe": 2.54,
+        "win_rate": 0.62,
+        "avg_return_pct": 14.6,
+        "volatility": 0.8,
+        "n_trades": 152
+    },
+    "NZDUSD": {
+        "sharpe": -0.21,
+        "win_rate": 0.48,
+        "avg_return_pct": -1.6,
+        "volatility": 1.2,
+        "n_trades": 215
+    },
+
+    # ========================================
+    # FX CROSSES (CONFIRMADO via backtest)
+    # ========================================
+    "EURGBP": {
+        "sharpe": 6.00,
+        "win_rate": 0.68,
+        "avg_return_pct": 31.4,
+        "volatility": 0.7,
+        "n_trades": 128
+    },
+    "EURJPY": {
+        "sharpe": -0.23,
+        "win_rate": 0.49,
+        "avg_return_pct": -1.1,
+        "volatility": 1.3,
+        "n_trades": 151
+    },
+    "GBPJPY": {
+        "sharpe": 2.24,
+        "win_rate": 0.61,
+        "avg_return_pct": 12.6,
+        "volatility": 1.2,
+        "n_trades": 162
+    },
+    "AUDJPY": {
+        "sharpe": -0.15,
+        "win_rate": 0.49,
+        "avg_return_pct": -0.9,
+        "volatility": 1.4,
+        "n_trades": 163
+    },
+
+    # ========================================
+    # METAIS (CONFIRMADO via backtest - M5)
+    # ========================================
+    "GOLD": {
+        "sharpe": -0.98,
+        "win_rate": 0.47,
+        "avg_return_pct": -5.5,
+        "volatility": 1.5,
+        "n_trades": 167
+    },
+    "SILVER": {
+        "sharpe": -1.15,
+        "win_rate": 0.46,
+        "avg_return_pct": -7.1,
+        "volatility": 2.0,
+        "n_trades": 201
+    },
+
+    # ========================================
+    # ÍNDICES (Estimativas - FAZER BACKTEST!)
+    # ========================================
+    "US500": {
+        "sharpe": 1.00,
+        "win_rate": 0.54,
+        "avg_return_pct": 5.5,
+        "volatility": 1.8,
+        "n_trades": 72
+    },
+    "US100": {
+        "sharpe": 1.05,
+        "win_rate": 0.55,
+        "avg_return_pct": 6.0,
+        "volatility": 2.2,
+        "n_trades": 68
+    },
+    "GER40": {
+        "sharpe": 0.95,
+        "win_rate": 0.53,
+        "avg_return_pct": 5.0,
+        "volatility": 2.0,
+        "n_trades": 65
+    },
+    "UK100": {
+        "sharpe": -0.56,
+        "win_rate": 0.48,
+        "avg_return_pct": -3.0,
+        "volatility": 2.5,
+        "n_trades": 146
+    },
+    "JP225": {
+        "sharpe": 0.85,
+        "win_rate": 0.52,
+        "avg_return_pct": 4.5,
+        "volatility": 2.3,
+        "n_trades": 58
+    },
+
+    # ========================================
+    # COMMODITIES (Estimativas - FAZER BACKTEST!)
+    # ========================================
+    "USOIL": {
+        "sharpe": 0.75,
+        "win_rate": 0.52,
+        "avg_return_pct": 4.0,
+        "volatility": 3.5,
+        "n_trades": 56
+    },
+    "UKOIL": {
+        "sharpe": 0.70,
+        "win_rate": 0.51,
+        "avg_return_pct": 3.5,
+        "volatility": 3.5,
+        "n_trades": 52
+    },
+    "NGAS": {
+        "sharpe": 0.60,
+        "win_rate": 0.50,
+        "avg_return_pct": 3.0,
+        "volatility": 4.5,
+        "n_trades": 48
+    },
+
+    # ========================================
+    # CRYPTO (CONFIRMADO via backtest)
+    # ========================================
+    "BTCUSD": {
+        "sharpe": -0.73,
+        "win_rate": 0.47,
+        "avg_return_pct": -3.5,
+        "volatility": 3.0,
+        "n_trades": 111
+    },
+    "ETHUSD": {
+        "sharpe": 0.29,
+        "win_rate": 0.50,
+        "avg_return_pct": 1.0,
+        "volatility": 3.5,
+        "n_trades": 91
+    },
+    "XRPUSD": {
+        "sharpe": 1.07,
+        "win_rate": 0.55,
+        "avg_return_pct": 5.3,
+        "volatility": 4.0,
+        "n_trades": 119
+    },
+    "SOLUSD": {
+        "sharpe": 0.70,
+        "win_rate": 0.52,
+        "avg_return_pct": 3.0,
+        "volatility": 4.2,
+        "n_trades": 120
+    },
+}
+
+# ============================================================
+#  NOTAS IMPORTANTES
+# ============================================================
+# 1. Ativos com dados insuficientes no broker:
+#    - US500, US100, GER40 (verificar disponibilidade)
+#    - USOIL, UKOIL, NGAS (verificar disponibilidade)
+#    - JP225 (verificar disponibilidade)
+#
+# 2. Sistema auto-remove ativos sem dados no MT5
+#
+# 3. Alocação proporcional ao Sharpe:
+#    - Sharpe 6.0 (EURGBP) → ~20% do risk total
+#    - Sharpe -0.7 (BTCUSD) → ~1% do risk total
+#
+# 4. Ativos fracos OPERAM mas com capital mínimo
+#
+# 5. FAZER BACKTESTS dos ativos estimados:
+#    - Índices: US500, US100, GER40, JP225
+#    - Commodities: USOIL, UKOIL, NGAS
+#    - Metais em H1: GOLD, SILVER
+

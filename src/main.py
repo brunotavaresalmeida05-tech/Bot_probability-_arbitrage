@@ -13,9 +13,23 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from src.portfolio_allocator import PortfolioAllocator
 import config.settings as cfg
 import src.mt5_connector as mt5c
+from src.strategy_manager import StrategyManager
+from src.filters.regime_detector import RegimeDetector
+from src.filters.news_filter import NewsFilter
+from src.filters.correlation_filter import CorrelationFilter
+from src.filters.sentiment_analyzer import SentimentAnalyzer
+from src.filters.volume_filter import VolumeFilter
 import src.strategy as strat
+
+# Filters
+regime_detector = RegimeDetector()
+news_filter = NewsFilter()
+correlation_filter = CorrelationFilter()
+sentiment_analyzer = SentimentAnalyzer()
+volume_filter = VolumeFilter()
 import src.logger as log
 import src.dashboard_server as dash
 import src.arb_runner as arb_runner
@@ -63,7 +77,8 @@ PAPER_MODE = False
 def _get_all_bars():   return _bars_cache
 def _get_all_prices():
     prices = {}
-    for sym in cfg.SYMBOLS + cfg.ARB_EXTRA_SYMBOLS:
+    syms = cfg.ALL_AVAILABLE_SYMBOLS if getattr(cfg, "USE_DYNAMIC_ALLOCATION", False) else cfg.SYMBOLS
+    for sym in syms + cfg.ARB_EXTRA_SYMBOLS:
         tick = mt5c.get_tick(sym)
         if tick:
             prices[sym] = (tick.bid + tick.ask) / 2
@@ -103,7 +118,7 @@ def get_daily_closed_pnl(symbol):
 
 # ─── Processar símbolo ────────────────────────────────────────
 
-def process_symbol(symbol: str, account_balance: float) -> dict:
+def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllocator = None, strategy_manager: StrategyManager = None, sentiment: dict = None) -> dict:
     status = {"symbol": symbol, "z": float("nan"), "close": "–",
               "ma": "–", "spread": "–", "signal": None, "position": "–", "pnl": None}
 
@@ -118,6 +133,35 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
 
     _bars_cache[symbol] = df
 
+    # Indicadores
+    close   = df["close"]
+    ma_s    = strat.compute_ma(close, params.get("MA_PERIOD", cfg.MA_PERIOD), cfg.MA_TYPE)
+    sd_s    = strat.compute_stddev(close, params.get("STDDEV_PERIOD", cfg.STDDEV_PERIOD))
+    atr_s   = strat.compute_atr(df, cfg.ATR_PERIOD)
+    atr_b_s = strat.compute_atr(df, cfg.ATR_BASE_PERIOD)
+    
+    # Adicionar ATR ao DF para o RegimeDetector
+    df = df.copy()
+    df['atr'] = atr_s
+
+    # Volume check
+    vol_check = volume_filter.check_volume(df)
+    if not vol_check['volume_ok']:
+        log.info(f"Skip - Volume baixo ({vol_check['volume_ratio']:.2f}x)", symbol)
+        return status
+
+    # Detectar regime
+    regime = regime_detector.detect_regime(df)
+    if regime['regime'] == 'VOLATILE_RANGE':
+        log.info(f"Skip - regime {regime['regime']} (ADX={regime['adx']:.1f}, VolZ={regime['volatility_z']:.1f})", symbol)
+        return status
+        
+    # News filter
+    news_check = news_filter.is_blocked(symbol, datetime.now())
+    if news_check['blocked']:
+        log.info(f"Bloqueado - {news_check['event_name']} em {news_check['minutes_until']}min", symbol)
+        return status
+
     if not is_new_bar(symbol, df):
         pos = get_position_obj(symbol)
         if pos:
@@ -125,13 +169,7 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
             status["pnl"]      = pos.profit
         return status
 
-    # Indicadores
-    close   = df["close"]
-    ma_s    = strat.compute_ma(close, params.get("MA_PERIOD", cfg.MA_PERIOD), cfg.MA_TYPE)
-    sd_s    = strat.compute_stddev(close, params.get("STDDEV_PERIOD", cfg.STDDEV_PERIOD))
-    atr_s   = strat.compute_atr(df, cfg.ATR_PERIOD)
-    atr_b_s = strat.compute_atr(df, cfg.ATR_BASE_PERIOD)
-
+    # Indicadores (re-calculados para garantir atualização)
     z_last        = float(((close - ma_s) / sd_s.replace(0, np.nan)).iloc[-1])
     ma_last       = float(ma_s.iloc[-1])
     atr_last      = float(atr_s.iloc[-1])
@@ -200,8 +238,15 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
 
         do_exit, reason = False, ""
 
+        # Exit via Strategy Manager
+        if cfg.USE_MULTI_STRATEGY and strategy_manager:
+            multi_signal = strategy_manager.get_combined_signal(symbol, df, datetime.now())
+            if multi_signal['signal'] == 'EXIT':
+                do_exit = True
+                reason = f"Multi-strategy EXIT ({multi_signal['strategy']})"
+
         # Exit MTF
-        if _MTF and cfg.USE_MULTI_TIMEFRAME:
+        if not do_exit and _MTF and cfg.USE_MULTI_TIMEFRAME:
             do_exit, reason = mtf.get_mtf_exit_signal(symbol, pos_type)
 
         # Exit Z-score (fallback)
@@ -232,6 +277,13 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
                 log.trade_close(symbol, pos_type, pos.price_open, current_price,
                                 pos.profit, z_last, reason)
                 state.record_trade_result(pos.profit)
+                
+                # Atualizar performance no Strategy Manager
+                if cfg.USE_MULTI_STRATEGY and strategy_manager:
+                    # Tentar recuperar nome da estratégia via comment se possível (ou usar default)
+                    strategy_name = "unknown"
+                    strategy_manager.update_strategy_performance(strategy_name, {"pnl": pos.profit})
+
                 log.log_trade_csv(symbol, pos_type, pos.price_open, current_price,
                     pos.stop_loss, entry_z.get(pos.ticket, float("nan")),
                     z_last, entry_atr.get(pos.ticket, float("nan")),
@@ -258,49 +310,73 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
         log.info(f"[dim]MACRO BLOCK: {macro_score:.3f} {macro_regime}[/]", symbol)
         return status
 
-    # Sinal — combinação de Z-score e MTF
-    z_signal = None
-    if not np.isnan(z_last):
-        if z_last <= -z_enter and close_last < ma_last:
-            z_signal = "BUY"
-        elif z_last >= z_enter and close_last > ma_last:
-            z_signal = "SELL"
+    # ============================================================
+    #  SIGNAL GENERATION
+    # ============================================================
+    signal = None
+    strategy_name = "Mean Reversion"
+    confidence = 1.0
 
-    # MTF confirma ou gera sinal independente
-    if _MTF and cfg.USE_MULTI_TIMEFRAME and mtf_signal:
-        if z_signal == mtf_signal:
-            # Ambos concordam — sinal forte
-            signal     = z_signal
-            lot_mult  *= (1.0 + mtf_confidence * 0.3)
-            log.info(f"MTF+Z concordam: {signal} (conf={mtf_confidence:.2f})", symbol)
-        elif z_signal and mtf_signal and z_signal != mtf_signal:
-            # Discordam — não entrar
-            log.info(f"[dim]MTF({mtf_signal}) ≠ Z({z_signal}) → skip[/]", symbol)
-            return status
-        else:
-            signal = z_signal  # só Z disponível
+    if cfg.USE_MULTI_STRATEGY and strategy_manager:
+        # Multi-strategy signals
+        multi_result = strategy_manager.get_combined_signal(symbol, df, datetime.now())
+        
+        if multi_result['signal'] in ['BUY', 'SELL']:
+            signal = multi_result['signal']
+            strategy_name = multi_result['strategy']
+            confidence = multi_result['confidence']
+            
+            # Ajuste por sentimento
+            if sentiment:
+                adj = sentiment_analyzer.adjust_strategy(sentiment['sentiment'], strategy_name.lower().replace(" ", "_"))
+                if not adj['use_strategy']:
+                    log.info(f"Skip - Sentimento {sentiment['sentiment']} bloqueia {strategy_name}", symbol)
+                    return status
+                confidence *= adj['adjust_size']
+                
+            print(f"{symbol}: {signal} via {strategy_name} (conf={confidence:.2f})")
     else:
-        signal = z_signal
+        # Usar estratégia mean reversion existente
+        z_signal = None
+        if not np.isnan(z_last):
+            if z_last <= -z_enter and close_last < ma_last:
+                z_signal = "BUY"
+            elif z_last >= z_enter and close_last > ma_last:
+                z_signal = "SELL"
+
+        # MTF confirma ou gera sinal independente
+        if _MTF and cfg.USE_MULTI_TIMEFRAME and mtf_signal:
+            if z_signal == mtf_signal:
+                signal     = z_signal
+                lot_mult  *= (1.0 + mtf_confidence * 0.3)
+                log.info(f"MTF+Z concordam: {signal} (conf={mtf_confidence:.2f})", symbol)
+            elif z_signal and mtf_signal and z_signal != mtf_signal:
+                log.info(f"[dim]MTF({mtf_signal}) ≠ Z({z_signal}) → skip[/]", symbol)
+                return status
+            else:
+                signal = z_signal
+        else:
+            signal = z_signal
+            
+        # Ajuste por sentimento para Mean Reversion
+        if signal and sentiment:
+            adj = sentiment_analyzer.adjust_strategy(sentiment['sentiment'], 'mean_reversion')
+            if not adj['use_strategy']:
+                log.info(f"Skip - Sentimento {sentiment['sentiment']} bloqueia Mean Reversion", symbol)
+                return status
+            confidence *= adj['adjust_size']
 
     status["signal"] = signal
     if signal is None:
         return status
-
-    # Portfolio check
-    if _PM and cfg.USE_PORTFOLIO_MANAGER:
-        sl_tmp = strat.compute_stop_loss(signal, close_last, ma_last, sd_last, atr_last)
-        sl_dist_tmp = abs(close_last - sl_tmp) if sl_tmp > 0 else atr_last * 2
-        risk_money_tmp = account_balance * cfg.RISK_PER_TRADE_PCT / 100.0
-        base_lots = mt5c.calculate_lot_size(symbol, risk_money_tmp, sl_dist_tmp)
-
-        can_open, pm_reason, adj_lots = pm.can_open_position(
-            symbol, signal, base_lots, account_balance, cfg.MAGIC_NUMBER
-        )
-        if not can_open:
-            log.info(f"[dim]PORTFOLIO BLOCK: {pm_reason}[/]", symbol)
-            return status
-        if adj_lots != base_lots:
-            log.info(f"[dim]PORTFOLIO: lot ajustado {base_lots}→{adj_lots} | {pm_reason}[/]", symbol)
+        
+    # Correlation check
+    open_pos = mt5c.get_open_positions(None, cfg.MAGIC_NUMBER)
+    open_symbols = [p.symbol for p in open_pos]
+    corr_check = correlation_filter.check_exposure(symbol, open_symbols)
+    if not corr_check['allowed']:
+        log.info(f"{symbol}: {corr_check['reason']}", symbol)
+        return status
 
     # Abrir posição
     sl = strat.compute_stop_loss(signal, close_last, ma_last, sd_last, atr_last)
@@ -308,12 +384,20 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
         log.warning("SL inválido", symbol)
         return status
 
-    sl_dist    = abs(close_last - sl)
-    risk_money = account_balance * cfg.RISK_PER_TRADE_PCT / 100.0
-    base_lots  = mt5c.calculate_lot_size(symbol, risk_money, sl_dist)
+    sl_dist = abs(close_last - sl)
+    
+    if cfg.USE_DYNAMIC_ALLOCATION and allocator:
+        base_lots, risk_money = allocator.get_position_size(symbol, sl_dist, close_last)
+    else:
+        risk_money = account_balance * cfg.RISK_PER_TRADE_PCT / 100.0
+        base_lots  = mt5c.calculate_lot_size(symbol, risk_money, sl_dist)
+
+    if base_lots <= 0:
+        log.warning("Lots = 0 (sem alocação)", symbol)
+        return status
 
     # Aplicar multiplicadores
-    lots = round(base_lots * min(lot_mult, cfg.MACRO_LOT_MAX_MULT), 2)
+    lots = round(base_lots * min(lot_mult * confidence, cfg.MACRO_LOT_MAX_MULT), 2)
     info = mt5c.get_symbol_info(symbol)
     if info:
         lots = max(lots, info.volume_min)
@@ -324,11 +408,60 @@ def process_symbol(symbol: str, account_balance: float) -> dict:
         return status
 
     log.trade_open(symbol, signal, lots, close_last, sl, z_last, atr_last)
-    if _MACRO and macro_score != 0:
-        log.info(f"[dim]macro={macro_score:+.3f} {macro_regime} lot×{lot_mult:.2f}[/]", symbol)
+    if strategy_name != "Mean Reversion":
+        log.info(f"Estratégia: {strategy_name} | Confiança: {confidence:.2f}", symbol)
 
     if not PAPER_MODE:
-        result = mt5c.send_order(symbol, signal, lots, sl, 0.0, cfg.MAGIC_NUMBER, "MR")
+        comment = f"MR_{strategy_name[:5]}"
+        result = mt5c.send_order(symbol, signal, lots, sl, 0.0, cfg.MAGIC_NUMBER, comment)
+        if result["success"]:
+            ticket = result["ticket"]
+            entry_z[ticket]   = z_last
+            entry_atr[ticket] = atr_last
+            state.trades_today += 1
+            status["position"] = signal
+        else:
+            log.error(f"Ordem falhou: {result.get('error')} ({result.get('retcode')})", symbol)
+    else:
+        log.info("[italic]PAPER: ordem simulada[/]", symbol)
+        state.trades_today += 1
+        status["position"] = signal
+
+    return status
+    if sl <= 0:
+        log.warning("SL inválido", symbol)
+        return status
+
+    sl_dist = abs(close_last - sl)
+    
+    if cfg.USE_DYNAMIC_ALLOCATION and allocator:
+        base_lots, risk_money = allocator.get_position_size(symbol, sl_dist, close_last)
+    else:
+        risk_money = account_balance * cfg.RISK_PER_TRADE_PCT / 100.0
+        base_lots  = mt5c.calculate_lot_size(symbol, risk_money, sl_dist)
+
+    if base_lots <= 0:
+        log.warning("Lots = 0 (sem alocação)", symbol)
+        return status
+
+    # Aplicar multiplicadores
+    lots = round(base_lots * min(lot_mult * confidence, cfg.MACRO_LOT_MAX_MULT), 2)
+    info = mt5c.get_symbol_info(symbol)
+    if info:
+        lots = max(lots, info.volume_min)
+        lots = min(lots, info.volume_max)
+
+    if lots <= 0:
+        log.warning("Lots = 0, skip", symbol)
+        return status
+
+    log.trade_open(symbol, signal, lots, close_last, sl, z_last, atr_last)
+    if strategy_name != "Mean Reversion":
+        log.info(f"Estratégia: {strategy_name} | Confiança: {confidence:.2f}", symbol)
+
+    if not PAPER_MODE:
+        comment = f"MR_{strategy_name[:5]}"
+        result = mt5c.send_order(symbol, signal, lots, sl, 0.0, cfg.MAGIC_NUMBER, comment)
         if result["success"]:
             ticket = result["ticket"]
             entry_z[ticket]   = z_last
@@ -358,7 +491,47 @@ def run(mode: str):
         sys.exit(1)
 
     account = mt5c.get_account_info()
-    log.print_header(cfg.SYMBOLS, account)
+    balance = account.get("balance", 0.0)
+
+    # ============================================================
+    #  INICIALIZAR PORTFOLIO ALLOCATOR
+    # ============================================================
+    symbols_to_trade = cfg.SYMBOLS
+    allocator = None
+
+    if getattr(cfg, "USE_DYNAMIC_ALLOCATION", False):
+        log.info("🚀 SISTEMA DE PORTFOLIO ALLOCATION DINÂMICO")
+        allocator = PortfolioAllocator(
+            total_capital=balance,
+            max_total_risk_pct=cfg.MAX_TOTAL_RISK_PCT,
+            min_sharpe_threshold=cfg.MIN_SHARPE_THRESHOLD,
+            rebalance_interval_hours=cfg.REBALANCE_INTERVAL_HOURS
+        )
+        allocator.register_backtest_results(cfg.ASSET_METRICS)
+        allocator.rebalance(force=True)
+        
+        log.info("📊 ALOCAÇÃO INICIAL:")
+        print(allocator.get_allocation_report().to_string(index=False))
+        
+        symbols_to_trade = cfg.ALL_AVAILABLE_SYMBOLS
+    
+    # ============================================================
+    #  STRATEGY MANAGER
+    # ============================================================
+    if cfg.USE_MULTI_STRATEGY:
+        print("\n🎯 Carregando estratégias...")
+        strategy_manager = StrategyManager()
+        
+        # Mostrar alocação
+        allocation = strategy_manager.get_strategy_allocation(balance)
+        log.info("💰 ALOCAÇÃO POR ESTRATÉGIA:", "STRAT")
+        for name, amount in allocation.items():
+            weight = (amount / balance) * 100
+            print(f"  {name:20s}: €{amount:8.2f} ({weight:5.1f}%)")
+    else:
+        strategy_manager = None
+
+    log.print_header(symbols_to_trade, account)
 
     if PAPER_MODE:
         log.warning("⚠ MODO PAPER: sem ordens reais")
@@ -369,15 +542,19 @@ def run(mode: str):
     dash_url = dash.start_server(port=8765, open_browser=True)
     dash.set_trading_allowed(True)
     dash.set_system_state("RUNNING")
-    dash.start_tick_stream(cfg.SYMBOLS + cfg.ARB_EXTRA_SYMBOLS)
+    
+    # Tick stream com todos os símbolos ativos
+    all_syms = list(set(symbols_to_trade + cfg.ARB_EXTRA_SYMBOLS))
+    dash.start_tick_stream(all_syms)
+    
     log.success(f"Dashboard: {dash_url}", "DASH")
     log.success("Fast tick stream activo (200ms)", "DASH")
 
     if _OPT and cfg.OPTIMIZER_ENABLED:
-        optimizer.start_optimizer_thread(cfg.SYMBOLS)
+        optimizer.start_optimizer_thread(symbols_to_trade)
 
     if _MACRO and cfg.USE_MACRO_ENGINE:
-        macro.start_macro_engine(cfg.SYMBOLS, _get_all_bars, _get_all_prices)
+        macro.start_macro_engine(symbols_to_trade, _get_all_bars, _get_all_prices)
         log.success("Macro Engine iniciado (7 camadas)", "MACRO")
 
     if _MTF and cfg.USE_MULTI_TIMEFRAME:
@@ -394,12 +571,20 @@ def run(mode: str):
             account = mt5c.get_account_info()
             balance = account.get("balance", 0.0)
             dash.update_account(account)
+            
+            # Atualizar allocator se necessário
+            if allocator:
+                allocator.update_capital(balance)
+                if allocator.rebalance():
+                    log.info("🔄 Portfolio rebalanceado!", "ALLOC")
+                    print(allocator.get_allocation_report()[["Symbol", "Sharpe", "Risk %", "Risk €"]].to_string(index=False))
+
             rows = []
 
-            # Mean Reversion + MTF
-            for symbol in cfg.SYMBOLS:
+            # Mean Reversion + MTF + Multi-Strategy
+            for symbol in symbols_to_trade:
                 try:
-                    row = process_symbol(symbol, balance)
+                    row = process_symbol(symbol, balance, allocator, strategy_manager)
                     rows.append(row)
                 except Exception as e:
                     log.error(f"Erro: {e}", symbol)
@@ -408,7 +593,7 @@ def run(mode: str):
 
             # Macro summary
             if _MACRO and cfg.USE_MACRO_ENGINE:
-                for sym in cfg.SYMBOLS:
+                for sym in symbols_to_trade:
                     ctx = macro.get_macro_context(sym)
                     sc  = ctx.get("score", 0.0)
                     reg = ctx.get("regime", "?")
@@ -418,7 +603,7 @@ def run(mode: str):
 
             # Arbitragem Stat
             try:
-                arb_results = arb_runner.run_arb_cycle(cfg.SYMBOLS, balance)
+                arb_results = arb_runner.run_arb_cycle(symbols_to_trade, balance)
                 active = [r for r in arb_results if r.get("arb_signal")]
                 if active:
                     log.info(f"ARB sinais: {len(active)}", "ARB")
@@ -457,6 +642,11 @@ def run(mode: str):
     except KeyboardInterrupt:
         log.warning("Bot parado (Ctrl+C)")
     finally:
+        if strategy_manager:
+            print("\n📊 PERFORMANCE POR ESTRATÉGIA:")
+            report = strategy_manager.get_performance_report()
+            print(report.to_string(index=False))
+
         mt5c.disconnect()
         log.info("MT5 desligado.")
 

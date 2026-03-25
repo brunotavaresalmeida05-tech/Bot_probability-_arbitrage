@@ -87,24 +87,19 @@ class DailyState:
 #  FILTROS
 # ─────────────────────────────────────────────
 
-def is_within_session() -> bool:
+def is_within_session(symbol: str = None) -> bool:
+    if symbol and symbol.upper() in [s.upper() for s in cfg.SYMBOLS_24_7]:
+        return True
     if not cfg.USE_TIME_FILTER:
         return True
     h = datetime.now().hour
-    if not (cfg.SESSION_START_HOUR <= h < cfg.SESSION_END_HOUR):
-        return False
-    # No-trade windows
-    s1, e1 = cfg.NO_TRADE_WINDOW_1
-    s2, e2 = cfg.NO_TRADE_WINDOW_2
-    if s1 != e1 and s1 <= h < e1:
-        return False
-    if s2 != e2 and s2 <= h < e2:
-        return False
-    return True
+    return cfg.SESSION_START_HOUR <= h < cfg.SESSION_END_HOUR
 
 
 def spread_ok(symbol: str) -> bool:
-    return mt5c.get_spread_points(symbol) <= cfg.MAX_SPREAD_POINTS
+    max_spread = cfg.get_max_spread_for_symbol(symbol)
+    current = mt5c.get_spread_points(symbol)
+    return current <= max_spread
 
 
 def atr_sanity_ok(atr_last: float, atr_base_last: float) -> bool:
