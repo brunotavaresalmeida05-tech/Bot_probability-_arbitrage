@@ -47,12 +47,31 @@ def get_bars(symbol: str, timeframe_str: str, count: int) -> Optional[pd.DataFra
     tf = TIMEFRAME_MAP.get(timeframe_str)
     if tf is None:
         return None
+    
+    # Pedir count + 1 para remover a barra em formação (incompleta)
     rates = mt5.copy_rates_from_pos(symbol, tf, 0, count + 1)
+    
     if rates is None or len(rates) == 0:
+        import src.logger as log
+        log.error(f"Erro ao obter rates: {mt5.last_error()}", symbol)
         return None
+        
     df = pd.DataFrame(rates)
-    df["time"] = pd.to_datetime(df["time"], unit="s")
-    df.set_index("time", inplace=True)
+    
+    try:
+        # Garantir que 'time' existe e é numérico antes da conversão
+        if 'time' in df.columns:
+            df["time"] = pd.to_datetime(pd.to_numeric(df["time"]), unit="s")
+            df.set_index("time", inplace=True)
+        else:
+            import src.logger as log
+            log.error("Coluna 'time' não encontrada nos dados do MT5", symbol)
+            return None
+    except Exception as e:
+        import src.logger as log
+        log.error(f"Erro na conversão de timestamp: {e}", symbol)
+        return None
+        
     return df.iloc[:-1]  # remove barra actual (aberta)
 
 
