@@ -218,3 +218,46 @@ def close_position(position, magic, deviation=20):
     if result.retcode == mt5.TRADE_RETCODE_DONE:
         return {"success": True, "ticket": result.order}
     return {"success": False, "retcode": result.retcode, "error": result.comment}
+
+
+def close_position_partial(position, volume_to_close, magic, deviation=20):
+    """Fecha parcialmente uma posição."""
+    tick = get_tick(position.symbol)
+    if tick is None:
+        return {"success": False, "error": "no tick"}
+
+    close_type = mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+    price      = tick.bid if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_ASK
+
+    # Garantir que o volume é válido para o símbolo
+    info = mt5.symbol_info(position.symbol)
+    if info:
+        step = info.volume_step
+        volume_to_close = np.floor(volume_to_close / step) * step
+        volume_to_close = max(volume_to_close, info.volume_min)
+        volume_to_close = min(volume_to_close, position.volume)
+        volume_to_close = round(volume_to_close, 2)
+
+    if volume_to_close <= 0:
+        return {"success": False, "error": "volume inválido para parcial"}
+
+    request = {
+        "action":       mt5.TRADE_ACTION_DEAL,
+        "symbol":       position.symbol,
+        "volume":       volume_to_close,
+        "type":         close_type,
+        "position":     position.ticket,
+        "price":        price,
+        "deviation":    deviation,
+        "magic":        magic,
+        "comment":      "MR_partial",
+        "type_time":    mt5.ORDER_TIME_GTC,
+        "type_filling": mt5.ORDER_FILLING_IOC,
+    }
+
+    result = mt5.order_send(request)
+    if result is None:
+        return {"success": False, "error": "None"}
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        return {"success": True, "ticket": result.order, "volume_closed": volume_to_close}
+    return {"success": False, "retcode": result.retcode, "error": result.comment}

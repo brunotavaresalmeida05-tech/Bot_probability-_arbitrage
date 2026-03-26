@@ -22,7 +22,56 @@ from src.filters.news_filter import NewsFilter
 from src.filters.correlation_filter import CorrelationFilter
 from src.filters.sentiment_analyzer import SentimentAnalyzer
 from src.filters.volume_filter import VolumeFilter
+from src.risk.kelly_calculator import KellyCalculator
+from src.risk.dynamic_stops import DynamicStops
+from src.risk.portfolio_heat import PortfolioHeat
+from src.risk.drawdown_protector import DrawdownProtector
+from src.risk.position_manager import PositionManager
 import src.strategy as strat
+
+# Notifications
+try:
+    from src.notifications.telegram_bot import TelegramBot
+    _TELEGRAM = True
+except ImportError:
+    _TELEGRAM = False
+
+# Analytics
+try:
+    from src.analytics.performance_analyzer import PerformanceAnalyzer
+    from src.analytics.trade_logger import TradeLogger
+    _ANALYTICS = True
+except ImportError:
+    _ANALYTICS = False
+
+# Data Aggregator
+try:
+    from src.data_sources.data_aggregator import DataAggregator
+    _DATA_AGG = True
+except ImportError:
+    _DATA_AGG = False
+
+# Multi-API Aggregator
+try:
+    from src.data_sources.multi_api_aggregator import MultiAPIAggregator
+    _MULTI_API = True
+except ImportError:
+    _MULTI_API = False
+
+# Forex Factory Calendar
+try:
+    from src.data_sources.forex_factory import ForexFactoryAggregator
+    _FF_CALENDAR = True
+except ImportError:
+    _FF_CALENDAR = False
+
+# Data Health Monitor
+try:
+    from src.monitoring.data_health_monitor import DataHealthMonitor
+    from src.monitoring.data_quality_scorer import DataQualityScorer
+    _HEALTH_MON = True
+except ImportError:
+    _HEALTH_MON = False
 
 # Filters
 regime_detector = RegimeDetector()
@@ -30,6 +79,13 @@ news_filter = NewsFilter()
 correlation_filter = CorrelationFilter()
 sentiment_analyzer = SentimentAnalyzer()
 volume_filter = VolumeFilter()
+
+# Risk Management
+kelly = KellyCalculator(fractional_kelly=0.25)
+dynamic_stops = DynamicStops()
+portfolio_heat = PortfolioHeat(max_heat_pct=15.0)
+dd_protector = DrawdownProtector()
+position_mgr = PositionManager()
 import src.logger as log
 import src.dashboard_server as dash
 import src.arb_runner as arb_runner
@@ -72,6 +128,15 @@ entry_z:       dict = {}
 entry_atr:     dict = {}
 _bars_cache:   dict = {}
 PAPER_MODE = False
+telegram = None
+perf_analyzer = None
+trade_logger = None
+_trade_id_map: dict = {}  # ticket → trade_logger id
+data_agg = None
+multi_api = None
+ff_calendar = None
+health_monitor = None
+quality_scorer = None
 
 
 def _get_all_bars():   return _bars_cache
@@ -118,9 +183,24 @@ def get_daily_closed_pnl(symbol):
 
 # ─── Processar símbolo ────────────────────────────────────────
 
-def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllocator = None, strategy_manager: StrategyManager = None, sentiment: dict = None) -> dict:
+def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllocator = None, strategy_manager: StrategyManager = None, sentiment: dict = None, dd_check: dict = None, risk_multiplier: float = 1.0) -> dict:
     status = {"symbol": symbol, "z": float("nan"), "close": "–",
               "ma": "–", "spread": "–", "signal": None, "position": "–", "pnl": None}
+
+    # Data Quality Check
+    symbol_risk_mult = 1.0
+    if quality_scorer:
+        quality = quality_scorer.calculate_quality_score(symbol)
+        dash.update_symbol_quality(symbol, quality) # Enviar para o dashboard
+        
+        if quality['total_score'] < 50:
+            log.warning(f"Data quality {quality['grade']} - SKIPPING", symbol)
+            return status
+        elif quality['total_score'] < 70:
+            symbol_risk_mult = 0.75
+            log.info(f"Data quality {quality['grade']} - reducing size 25%", symbol)
+        
+        log.info(f"Quality {quality['grade']} ({quality['total_score']:.0f}/100)", symbol)
 
     params = optimizer.apply_best_params(symbol) if _OPT else {
         "MA_PERIOD": cfg.MA_PERIOD, "STDDEV_PERIOD": cfg.STDDEV_PERIOD,
@@ -167,6 +247,16 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
         if pos:
             status["position"] = "BUY" if pos.type == 0 else "SELL"
             status["pnl"]      = pos.profit
+            
+            # Position Management: Scale Out (mesmo se não for barra nova)
+            tick = mt5c.get_tick(symbol)
+            if tick:
+                current_price = tick.bid if pos.type == 0 else tick.ask
+                scale_result = position_mgr.scale_out_on_profit(symbol, current_price)
+                if scale_result['action'] == 'SCALE_OUT':
+                    log.info(f"Scale out: fechando {scale_result['closed_pct']:.1f}% em lucro target {scale_result['profit_target']}%", symbol)
+                    if not PAPER_MODE:
+                        mt5c.close_position_partial(pos, scale_result['closed_lots'], cfg.MAGIC_NUMBER)
         return status
 
     # Indicadores (re-calculados para garantir atualização)
@@ -184,6 +274,28 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
         "ma":     round(ma_last, 5),
         "spread": round(spread, 1),
     })
+
+    # Multi-API Consensus (prioridade) ou Data Aggregator (fallback)
+    _api = multi_api or data_agg
+    if _api:
+        min_conf = getattr(cfg, 'CONSENSUS_MIN_CONFIDENCE', 0.85)
+        min_src = getattr(cfg, 'CONSENSUS_MIN_SOURCES', 2)
+
+        consensus = _api.get_consensus_price(symbol)
+        n_sources = consensus.get('sources_count', len(consensus.get('sources', {})))
+        if (consensus.get('price') and
+                consensus.get('confidence', 0) >= min_conf and
+                n_sources >= min_src):
+            close_last = consensus['price']
+            status["close"] = round(close_last, 5)
+
+        # News sentiment como filtro adicional
+        agg_sentiment = _api.get_news_sentiment(symbol, hours=12)
+        if agg_sentiment.get('sources_count', agg_sentiment.get('article_count', 0)) > 0:
+            if sentiment is None:
+                sentiment = {}
+            sentiment['data_agg_score'] = agg_sentiment['score']
+            sentiment['data_agg_recommendation'] = agg_sentiment['recommendation']
 
     # Macro context
     macro_score, macro_regime, macro_reasons = 0.0, "neutral", []
@@ -236,6 +348,13 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
         tick = mt5c.get_tick(symbol)
         current_price = tick.bid if pos_type == "BUY" else tick.ask
 
+        # Position Management: Scale Out
+        scale_result = position_mgr.scale_out_on_profit(symbol, current_price)
+        if scale_result['action'] == 'SCALE_OUT':
+            log.info(f"Scale out: fechando {scale_result['closed_pct']:.1f}% em lucro target {scale_result['profit_target']}%", symbol)
+            if not PAPER_MODE:
+                mt5c.close_position_partial(pos, scale_result['closed_lots'], cfg.MAGIC_NUMBER)
+
         do_exit, reason = False, ""
 
         # Exit via Strategy Manager
@@ -283,6 +402,28 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
                     # Tentar recuperar nome da estratégia via comment se possível (ou usar default)
                     strategy_name = "unknown"
                     strategy_manager.update_strategy_performance(strategy_name, {"pnl": pos.profit})
+
+                # Telegram close alert
+                if telegram and cfg.TELEGRAM_ALERTS.get('trade_closed'):
+                    telegram.send_trade_close_alert({
+                        'symbol': symbol, 'direction': pos_type,
+                        'entry_price': pos.price_open, 'exit_price': current_price,
+                        'pnl': pos.profit, 'reason': reason,
+                    })
+
+                # Trade Logger + Performance Analyzer
+                if trade_logger and pos.ticket in _trade_id_map:
+                    trade_logger.log_trade_close(_trade_id_map.pop(pos.ticket), {
+                        'exit_price': current_price,
+                        'pnl': pos.profit,
+                        'exit_reason': reason,
+                    })
+                if perf_analyzer:
+                    perf_analyzer.add_trade({
+                        'pnl': pos.profit,
+                        'symbol': symbol,
+                        'strategy': strategy_name if strategy_name != "unknown" else "Mean Reversion",
+                    })
 
                 log.log_trade_csv(symbol, pos_type, pos.price_open, current_price,
                     pos.stop_loss, entry_z.get(pos.ticket, float("nan")),
@@ -378,6 +519,42 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
         log.info(f"{symbol}: {corr_check['reason']}", symbol)
         return status
 
+    # Forex Factory: High-impact event block
+    if ff_calendar and getattr(cfg, 'USE_FOREX_FACTORY_SCRAPING', False):
+        event_check = ff_calendar.is_high_impact_event_soon(
+            symbol,
+            minutes_before=getattr(cfg, 'FF_BLOCK_MINUTES_BEFORE', 30),
+            minutes_after=getattr(cfg, 'FF_BLOCK_MINUTES_AFTER', 15),
+        )
+        if event_check['blocked']:
+            log.info(
+                f"FF Block: {event_check['event']} ({event_check['currency']}) "
+                f"em {event_check['minutes_until']}min [{event_check.get('source','')}]",
+                symbol,
+            )
+            return status
+
+    # Multi-API: News sentiment filter
+    if _api and sentiment:
+        rec = sentiment.get('data_agg_recommendation')
+        if rec == 'BEARISH' and signal == 'BUY':
+            log.info(f"Skip BUY - sentiment bearish (score={sentiment.get('data_agg_score', 0):.2f})", symbol)
+            return status
+        elif rec == 'BULLISH' and signal == 'SELL':
+            log.info(f"Skip SELL - sentiment bullish (score={sentiment.get('data_agg_score', 0):.2f})", symbol)
+            return status
+
+    # Multi-API: Order book filter (crypto)
+    if multi_api and getattr(cfg, 'USE_ORDER_BOOK_FILTER', False) and multi_api._is_crypto(symbol):
+        orderbook = multi_api.get_order_book(symbol)
+        if orderbook:
+            if signal == 'BUY' and orderbook['imbalance'] < -0.3:
+                log.info(f"Skip BUY - order book bearish (imb={orderbook['imbalance']:.2f})", symbol)
+                return status
+            elif signal == 'SELL' and orderbook['imbalance'] > 0.3:
+                log.info(f"Skip SELL - order book bullish (imb={orderbook['imbalance']:.2f})", symbol)
+                return status
+
     # Abrir posição
     sl = strat.compute_stop_loss(signal, close_last, ma_last, sd_last, atr_last)
     if sl <= 0:
@@ -396,20 +573,21 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
         log.warning("Lots = 0 (sem alocação)", symbol)
         return status
 
-    # Aplicar multiplicadores
-    lots = round(base_lots * min(lot_mult * confidence, cfg.MACRO_LOT_MAX_MULT), 2)
+    # Aplicar multiplicadores (incluindo Drawdown Protection e Data Quality)
+    risk_mult = (dd_check['risk_multiplier'] if dd_check else 1.0) * risk_multiplier * symbol_risk_mult
+    lots = round(base_lots * risk_mult * min(lot_mult * confidence, cfg.MACRO_LOT_MAX_MULT), 2)
     info = mt5c.get_symbol_info(symbol)
     if info:
         lots = max(lots, info.volume_min)
         lots = min(lots, info.volume_max)
 
     if lots <= 0:
-        log.warning("Lots = 0, skip", symbol)
+        log.warning(f"Lots = 0 (Risk Mult: {risk_mult:.2f}), skip", symbol)
         return status
 
     log.trade_open(symbol, signal, lots, close_last, sl, z_last, atr_last)
     if strategy_name != "Mean Reversion":
-        log.info(f"Estratégia: {strategy_name} | Confiança: {confidence:.2f}", symbol)
+        log.info(f"Estratégia: {strategy_name} | Confiança: {confidence:.2f} | Risk Mult: {risk_mult:.2f}", symbol)
 
     if not PAPER_MODE:
         comment = f"MR_{strategy_name[:5]}"
@@ -420,60 +598,35 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
             entry_atr[ticket] = atr_last
             state.trades_today += 1
             status["position"] = signal
+
+            # Registrar no PositionManager
+            position_mgr.open_position(symbol, lots, result['price'], signal)
+
+            # Telegram alert
+            if telegram and cfg.TELEGRAM_ALERTS.get('trade_opened'):
+                telegram.send_trade_alert({
+                    'symbol': symbol, 'direction': signal,
+                    'size': lots, 'entry_price': result['price'],
+                    'stop_loss': sl, 'strategy': strategy_name,
+                    'risk_money': risk_money,
+                })
+
+            # Trade Logger
+            if trade_logger:
+                db_id = trade_logger.log_trade_open({
+                    'symbol': symbol, 'strategy': strategy_name,
+                    'direction': signal, 'lot_size': lots,
+                    'entry_price': result['price'], 'stop_loss': sl,
+                })
+                _trade_id_map[ticket] = db_id
         else:
             log.error(f"Ordem falhou: {result.get('error')} ({result.get('retcode')})", symbol)
     else:
         log.info("[italic]PAPER: ordem simulada[/]", symbol)
         state.trades_today += 1
         status["position"] = signal
-
-    return status
-    if sl <= 0:
-        log.warning("SL inválido", symbol)
-        return status
-
-    sl_dist = abs(close_last - sl)
-    
-    if cfg.USE_DYNAMIC_ALLOCATION and allocator:
-        base_lots, risk_money = allocator.get_position_size(symbol, sl_dist, close_last)
-    else:
-        risk_money = account_balance * cfg.RISK_PER_TRADE_PCT / 100.0
-        base_lots  = mt5c.calculate_lot_size(symbol, risk_money, sl_dist)
-
-    if base_lots <= 0:
-        log.warning("Lots = 0 (sem alocação)", symbol)
-        return status
-
-    # Aplicar multiplicadores
-    lots = round(base_lots * min(lot_mult * confidence, cfg.MACRO_LOT_MAX_MULT), 2)
-    info = mt5c.get_symbol_info(symbol)
-    if info:
-        lots = max(lots, info.volume_min)
-        lots = min(lots, info.volume_max)
-
-    if lots <= 0:
-        log.warning("Lots = 0, skip", symbol)
-        return status
-
-    log.trade_open(symbol, signal, lots, close_last, sl, z_last, atr_last)
-    if strategy_name != "Mean Reversion":
-        log.info(f"Estratégia: {strategy_name} | Confiança: {confidence:.2f}", symbol)
-
-    if not PAPER_MODE:
-        comment = f"MR_{strategy_name[:5]}"
-        result = mt5c.send_order(symbol, signal, lots, sl, 0.0, cfg.MAGIC_NUMBER, comment)
-        if result["success"]:
-            ticket = result["ticket"]
-            entry_z[ticket]   = z_last
-            entry_atr[ticket] = atr_last
-            state.trades_today += 1
-            status["position"] = signal
-        else:
-            log.error(f"Ordem falhou: {result.get('error')} ({result.get('retcode')})", symbol)
-    else:
-        log.info("[italic]PAPER: ordem simulada[/]", symbol)
-        state.trades_today += 1
-        status["position"] = signal
+        # Simular registro no PositionManager
+        position_mgr.open_position(symbol, lots, close_last, signal)
 
     return status
 
@@ -550,6 +703,77 @@ def run(mode: str):
     log.success(f"Dashboard: {dash_url}", "DASH")
     log.success("Fast tick stream activo (200ms)", "DASH")
 
+    # Telegram
+    global telegram
+    if _TELEGRAM and getattr(cfg, 'TELEGRAM_ENABLED', False):
+        telegram = TelegramBot(cfg.TELEGRAM_BOT_TOKEN, cfg.TELEGRAM_CHAT_ID)
+        telegram.send_message("🤖 *Bot Started*\nMode: " + mode.upper())
+        log.success("Telegram notifications activas", "TG")
+    else:
+        telegram = None
+
+    # Analytics
+    global perf_analyzer, trade_logger
+    if _ANALYTICS:
+        perf_analyzer = PerformanceAnalyzer()
+        trade_logger = TradeLogger('data/trades.db')
+        log.success("Analytics + Trade Logger activos", "ANALYTICS")
+
+    # Data Aggregator
+    global data_agg
+    if _DATA_AGG and getattr(cfg, 'USE_DATA_AGGREGATOR', False):
+        data_agg = DataAggregator({
+            'alpha_vantage_key': getattr(cfg, 'ALPHA_VANTAGE_KEY', ''),
+            'polygon_key': getattr(cfg, 'POLYGON_KEY', ''),
+            'newsapi_key': getattr(cfg, 'NEWSAPI_KEY', ''),
+            'finnhub_key': getattr(cfg, 'FINNHUB_KEY', ''),
+            'fmp_key': getattr(cfg, 'FMP_KEY', ''),
+        })
+        log.success("Data Aggregator activo (multi-source)", "DATA")
+
+    # Multi-API Aggregator
+    global multi_api
+    if _MULTI_API and getattr(cfg, 'USE_MULTI_API_CONSENSUS', False):
+        multi_api = MultiAPIAggregator({
+            'fred_key': getattr(cfg, 'FRED_API_KEY', ''),
+            'polygon_key': getattr(cfg, 'POLYGON_KEY', ''),
+            'alpha_vantage_key': getattr(cfg, 'ALPHA_VANTAGE_KEY', ''),
+            'twelve_data_key': getattr(cfg, 'TWELVE_DATA_KEY', ''),
+            'fixer_key': getattr(cfg, 'FIXER_KEY', ''),
+            'eodhd_key': getattr(cfg, 'EODHD_KEY', ''),
+            'newsapi_key': getattr(cfg, 'NEWSAPI_KEY', ''),
+            'finnhub_key': getattr(cfg, 'FINNHUB_KEY', ''),
+            'marketaux_key': getattr(cfg, 'MARKETAUX_KEY', ''),
+            'currents_key': getattr(cfg, 'CURRENTS_KEY', ''),
+            'mediastack_key': getattr(cfg, 'MEDIASTACK_KEY', ''),
+            'cryptopanic_key': getattr(cfg, 'CRYPTOPANIC_KEY', ''),
+            'binance_key': getattr(cfg, 'BINANCE_API_KEY', ''),
+            'coingecko_key': getattr(cfg, 'COINGECKO_KEY', ''),
+            'etherscan_key': getattr(cfg, 'ETHERSCAN_KEY', ''),
+        })
+        log.success("Multi-API Consensus activo (15 APIs)", "MAPI")
+
+    # Forex Factory Calendar
+    global ff_calendar
+    if _FF_CALENDAR and getattr(cfg, 'USE_FOREX_FACTORY_SCRAPING', False):
+        ff_calendar = ForexFactoryAggregator({
+            'finnhub_key': getattr(cfg, 'FINNHUB_KEY', ''),
+            'trading_economics_key': getattr(cfg, 'TRADING_ECONOMICS_KEY', ''),
+        })
+        log.success("Forex Factory Calendar activo (FF + Finnhub + TE)", "FF")
+
+    # Data Health Monitor
+    global health_monitor, quality_scorer
+    if _HEALTH_MON and multi_api:
+        health_monitor = DataHealthMonitor(multi_api)
+        quality_scorer = DataQualityScorer(multi_api, health_monitor)
+        log.success("Data Quality Scorer activo", "HEALTH")
+    elif _HEALTH_MON and data_agg:
+        # Fallback para DataAggregator se multi_api não disponível
+        health_monitor = DataHealthMonitor(data_agg)
+        quality_scorer = DataQualityScorer(data_agg, health_monitor)
+        log.success("Data Quality Scorer activo (Aggregator fallback)", "HEALTH")
+
     if _OPT and cfg.OPTIMIZER_ENABLED:
         optimizer.start_optimizer_thread(symbols_to_trade)
 
@@ -570,8 +794,34 @@ def run(mode: str):
         while True:
             account = mt5c.get_account_info()
             balance = account.get("balance", 0.0)
+            equity = account.get("equity", balance)
             dash.update_account(account)
-            
+
+            # Data Quality Scorer - Global Health
+            risk_multiplier = 1.0
+            if quality_scorer:
+                system_health = quality_scorer.get_overall_system_health()
+                dash.update_system_health(system_health) # Enviar para o dashboard
+                
+                if system_health['status'] == 'CRITICAL':
+                    log.error(f"⚠️  SYSTEM CRITICAL - Data quality {system_health['overall_score']:.1f}")
+                    risk_multiplier *= 0.5
+                elif system_health['status'] == 'DEGRADED':
+                    log.warning(f"⚠️  SYSTEM DEGRADED - Data quality {system_health['overall_score']:.1f}")
+                    risk_multiplier *= 0.75
+
+            # Analytics: equity tracking
+            if perf_analyzer:
+                perf_analyzer.add_equity_point(equity)
+            if trade_logger:
+                trade_logger.log_equity_snapshot({
+                    'balance': balance,
+                    'equity': equity,
+                    'margin_used': account.get('margin'),
+                    'free_margin': account.get('margin_free'),
+                    'drawdown_pct': 0,
+                })
+
             # Atualizar allocator se necessário
             if allocator:
                 allocator.update_capital(balance)
@@ -579,12 +829,24 @@ def run(mode: str):
                     log.info("🔄 Portfolio rebalanceado!", "ALLOC")
                     print(allocator.get_allocation_report()[["Symbol", "Sharpe", "Risk %", "Risk €"]].to_string(index=False))
 
+            # Drawdown Protection
+            dd_check = dd_protector.check_drawdown(balance)
+            if dd_check['action'] == 'STOP':
+                log.warning(f"⚠️  TRADING STOPPED - Modo: {dd_check['mode']} | DD Diário: {dd_check['daily_dd_pct']:.2f}%")
+                if telegram and cfg.TELEGRAM_ALERTS.get('drawdown_warning'):
+                    telegram.send_drawdown_warning(dd_check.get('peak_dd_pct', dd_check['daily_dd_pct']))
+                time.sleep(60)
+                continue
+            elif dd_check.get('mode') == 'REDUCED':
+                if telegram and cfg.TELEGRAM_ALERTS.get('drawdown_warning'):
+                    telegram.send_drawdown_warning(dd_check.get('peak_dd_pct', dd_check.get('daily_dd_pct', 0)))
+
             rows = []
 
             # Mean Reversion + MTF + Multi-Strategy
             for symbol in symbols_to_trade:
                 try:
-                    row = process_symbol(symbol, balance, allocator, strategy_manager)
+                    row = process_symbol(symbol, balance, allocator, strategy_manager, dd_check=dd_check, risk_multiplier=risk_multiplier)
                     rows.append(row)
                 except Exception as e:
                     log.error(f"Erro: {e}", symbol)
@@ -636,6 +898,24 @@ def run(mode: str):
                 except Exception as e:
                     log.error(f"PM erro: {e}", "PM")
 
+            # Data Health Monitor (a cada 5 min)
+            if health_monitor:
+                import time as _t
+                if not hasattr(run, '_last_health_check'):
+                    run._last_health_check = 0
+                if _t.time() - run._last_health_check > 300:
+                    try:
+                        health = health_monitor.check_all_sources()
+                        log.info(
+                            f"Health: {health['healthy']} OK | "
+                            f"{health['degraded']} degraded | "
+                            f"{health['down']} down",
+                            "HEALTH",
+                        )
+                        run._last_health_check = _t.time()
+                    except Exception as e:
+                        log.error(f"Health check erro: {e}", "HEALTH")
+
             log.info(f"[dim]Próxima verificação em {cfg.LOOP_INTERVAL_SECONDS}s[/]")
             time.sleep(cfg.LOOP_INTERVAL_SECONDS)
 
@@ -646,6 +926,24 @@ def run(mode: str):
             print("\n📊 PERFORMANCE POR ESTRATÉGIA:")
             report = strategy_manager.get_performance_report()
             print(report.to_string(index=False))
+
+        # Analytics final report
+        if perf_analyzer:
+            print("\n📊 PERFORMANCE FINAL:")
+            report = perf_analyzer.generate_report()
+            for metric, value in report.items():
+                print(f"  {metric:20s}: {value:.2f}")
+
+            breakdown = perf_analyzer.get_strategy_breakdown()
+            if not breakdown.empty:
+                print("\n📈 BREAKDOWN POR ESTRATÉGIA:")
+                print(breakdown.to_string(index=False))
+
+        if trade_logger:
+            csv_file = trade_logger.export_to_csv('data/trades_export.csv')
+            print(f"\n💾 Trades exportados: {csv_file}")
+            stats = trade_logger.get_summary_stats()
+            print(f"   Total: {stats['total_trades']} | Win Rate: {stats['win_rate']:.1f}% | P&L: €{stats['total_pnl']:.2f}")
 
         mt5c.disconnect()
         log.info("MT5 desligado.")

@@ -366,6 +366,9 @@
     <li class="nav-item" data-tab="macro">
       <a href="javascript:void(0)"><i data-lucide="globe"></i> Macro</a>
     </li>
+    <li class="nav-item" data-tab="quality">
+      <a href="javascript:void(0)"><i data-lucide="check-circle"></i> Qualidade</a>
+    </li>
     <li class="nav-item" data-tab="config">
       <a href="javascript:void(0)"><i data-lucide="settings"></i> Config</a>
     </li>
@@ -530,6 +533,47 @@
       <div class="card">
         <div class="card-title"><div><i data-lucide="globe"></i> Inteligência Macro</div></div>
         <div id="macro-content-only"></div>
+      </div>
+    </section>
+
+    <!-- SECTION: QUALITY -->
+    <section id="quality" class="page-section">
+      <div class="card">
+        <div class="card-title"><div><i data-lucide="shield-check"></i> Saúde Geral do Sistema</div></div>
+        <div class="stats-row" style="grid-template-columns: repeat(3, 1fr);">
+          <div class="stat" style="text-align:center">
+            <div class="stat-label">System Health</div>
+            <div class="stat-value" id="q-system-grade" style="font-size:48px">–</div>
+            <div class="stat-sub" id="q-system-status">Aguardando...</div>
+          </div>
+          <div class="stat" style="text-align:center">
+            <div class="stat-label">APIs Online</div>
+            <div class="stat-value" id="q-apis-online" style="color:var(--blue)">–</div>
+            <div class="stat-sub" id="q-avg-uptime">0% Uptime</div>
+          </div>
+          <div class="stat" style="text-align:center">
+            <div class="stat-label">Avg Quality</div>
+            <div class="stat-value" id="q-avg-quality" style="color:var(--purple)">–</div>
+            <div class="stat-sub">score / 100</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><div><i data-lucide="database"></i> Qualidade de Dados por Símbolo</div></div>
+        <table>
+          <thead>
+            <tr>
+              <th>Símbolo</th>
+              <th>Score</th>
+              <th>Grade</th>
+              <th>Consensus</th>
+              <th>News</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="quality-tbody"></tbody>
+        </table>
       </div>
     </section>
 
@@ -726,6 +770,7 @@ function render(data) {
   renderOpenPositions(openPos);
   renderTrades(data.trades || []);
   renderMacro(syms);
+  renderQuality(data.system_health || {}, data.symbol_quality || {});
 
   // Footer: live metrics
   const now = new Date();
@@ -811,6 +856,34 @@ function renderMacro(syms) {
     </div>`;
   }).join('');
   elGeral.innerHTML = html; elOnly.innerHTML = html;
+}
+
+function renderQuality(health, symQuality) {
+  if (health.grade) {
+    const gradeEl = document.getElementById('q-system-grade');
+    gradeEl.textContent = health.grade;
+    gradeEl.className = 'stat-value ' + (['A+','A','A-'].includes(health.grade) ? 'positive' : (health.grade === 'F' ? 'negative' : 'neutral'));
+    document.getElementById('q-system-status').textContent = health.status || '–';
+    document.getElementById('q-apis-online').textContent = `${health.apis_healthy}/${health.apis_healthy + health.apis_down}`;
+    document.getElementById('q-avg-uptime').textContent = `${(health.avg_uptime_24h || 0).toFixed(1)}% Uptime`;
+    document.getElementById('q-avg-quality').textContent = `${(health.avg_quality_score || 0).toFixed(0)}/100`;
+  }
+
+  const keys = Object.keys(symQuality);
+  if (keys.length) {
+    document.getElementById('quality-tbody').innerHTML = keys.map(sym => {
+      const q = symQuality[sym];
+      const comps = q.components || {};
+      return `<tr>
+        <td><b>${sym}</b></td>
+        <td>${q.total_score.toFixed(0)}</td>
+        <td><span class="badge badge-none">${q.grade}</span></td>
+        <td>${(comps.price_consensus / 0.25).toFixed(0)}%</td>
+        <td>${(comps.news_coverage / 0.15).toFixed(0)}%</td>
+        <td style="font-size:10px; color:var(--muted)">${q.recommendation}</td>
+      </tr>`;
+    }).join('');
+  }
 }
 
 function updateMarketSessions() {

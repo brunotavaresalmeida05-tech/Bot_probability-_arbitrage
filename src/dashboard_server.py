@@ -34,6 +34,8 @@ _store: dict[str, Any] = {
     "trades": [],
     "equity_curve": [],
     "open_positions": [],  # ← lido directamente do MT5
+    "system_health": {},
+    "symbol_quality": {},
     "started_at": datetime.now().isoformat(),
     "last_update": None,
     "tick_ts": None,       # timestamp ms do último tick
@@ -41,6 +43,20 @@ _store: dict[str, Any] = {
 
 MAX_EQUITY_POINTS = 500
 MAX_TRADES = 50
+
+# ─────────────────────────────────────────────
+#  HEALTH & QUALITY UPDATERS
+# ─────────────────────────────────────────────
+
+def update_system_health(health: dict):
+    with _lock:
+        _store["system_health"] = health
+        _store["last_update"] = datetime.now().isoformat()
+
+def update_symbol_quality(symbol: str, quality: dict):
+    with _lock:
+        _store["symbol_quality"][symbol] = quality
+        _store["last_update"] = datetime.now().isoformat()
 
 # ─────────────────────────────────────────────
 #  FAST TICK STREAMER  (preços a cada ~200ms)

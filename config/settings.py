@@ -11,19 +11,25 @@ MT5_SERVER   = "ActivTradesCorp-Server"
 # --- API Keys ----------------------------------------------
 FRED_API_KEY      = "583922c6e7d2a106ee1eae29a70b90e0"
 POLYGON_KEY       = "2nC3wlQs0AVj8wF3kgT5jcyCNiIaB2iB"
-ALPHA_VANTAGE_KEY = "71K9P6F0RGLHYD39"
-NEWSAPI_KEY       = ""
+ALPHA_VANTAGE_KEY = "4F1D7CD56E2X2NE1"
+TWELVE_DATA_KEY   = "2e602e1a9694451da0218f15a9f47bad"
+FIXER_KEY         = "f47da607354dec69586e1af564bb7221"
+EODHD_KEY         = "69bdafa2818c60.63828076"
+NEWSAPI_KEY       = "3c7be108d2bc47c18e36e5437a76c632"
 FINNHUB_KEY       = "d6uquh1r01qig545jabgd6uquh1r01qig545jac0"
 MARKETAUX_KEY     = "Bc02zKl6R48yom6AtBEfSgMTBj9WMjM1jrRTGHVY"
 CURRENTS_KEY      = "p1ZOufwZzjpunAkPmVDqYU5-Q0Q7XFl_sWRr9rFW5f1bc7Gs"
 MEDIASTACK_KEY    = "fccc2bb417afb7ec2b7a79d6d98100de"
-EODHD_KEY         = "69bdafa2818c60.63828076"
+CRYPTOPANIC_KEY   = "8e33959127c1a228ef55177e1c8ef5d177edb1a7"
+BINANCE_API_KEY   = "q1gbM0TxW5ifubXLEdR7Y6btNEKHeiGd9767WKPtxOz9fSopVwz7lO1M93koRBIV"
+COINGECKO_KEY     = "CG-mKgvMyY9dA9CoW4cPEtG6PGd"
+ETHERSCAN_KEY     = "RNWS7AIBRZEVBRUYZ9GG2Y6VSNEFSEYWM3"
 
 # --- Fontes de dados ----------------------------------------
 USE_POLYGON_DATA  = False   # plano free não tem intraday
 USE_FRED_DATA     = True
-USE_NEWSAPI       = False
-USE_ALPHA_VANTAGE = False
+USE_NEWSAPI       = True
+USE_ALPHA_VANTAGE = True
 USE_MACRO_ENGINE  = True
 USE_FINNHUB       = True
 USE_MARKETAUX     = True
@@ -493,6 +499,95 @@ ASSET_METRICS = {
         "n_trades": 120
     },
 }
+
+# ============================================================
+#  EXTERNAL DATA SOURCES - TODAS AS APIS
+# ============================================================
+
+# Binance, CoinGecko, CryptoCompare, Yahoo Finance - SEM KEY NECESSARIA
+USE_BINANCE_DATA = True
+
+# Data Aggregator (simples - data_aggregator.py)
+USE_DATA_AGGREGATOR = False
+
+# Multi-API Consensus (avancado - multi_api_aggregator.py)
+USE_MULTI_API_CONSENSUS = True
+CONSENSUS_MIN_SOURCES = 2
+CONSENSUS_MIN_CONFIDENCE = 0.80  # 80% confianca minima
+
+# Order book filter (crypto)
+USE_ORDER_BOOK_FILTER = False
+
+# Data source weights (ponderacao por tipo de ativo)
+DATA_SOURCE_WEIGHTS = {
+    'crypto': {
+        'binance': 0.45,
+        'coingecko': 0.35,
+        'cryptocompare': 0.20
+    },
+    'forex': {
+        'alpha_vantage': 0.35,
+        'twelve_data': 0.35,
+        'fixer': 0.20,
+        'eodhd': 0.10
+    },
+    'stocks': {
+        'yahoo': 0.40,
+        'polygon': 0.35,
+        'eodhd': 0.25
+    }
+}
+
+# News sentiment sources
+NEWS_SOURCES = {
+    'newsapi': True,
+    'finnhub': True,
+    'marketaux': True,
+    'currents': True,
+    'mediastack': True,
+    'cryptopanic': True  # Crypto only
+}
+
+# API Health Monitoring
+MONITOR_API_HEALTH = True
+API_HEALTH_CHECK_INTERVAL = 300  # 5 minutos
+
+# ============================================================
+#  TELEGRAM NOTIFICATIONS
+# ============================================================
+
+TELEGRAM_ENABLED = False  # Ativar quando tiveres bot token
+TELEGRAM_BOT_TOKEN = ""   # Obter de @BotFather
+TELEGRAM_CHAT_ID = ""     # Teu chat ID
+
+# Que alertas enviar
+TELEGRAM_ALERTS = {
+    'trade_opened': True,
+    'trade_closed': True,
+    'drawdown_warning': True,
+    'daily_summary': True,
+    'weekly_summary': True,
+}
+
+# ============================================================
+#  EMAIL REPORTS
+# ============================================================
+
+EMAIL_ENABLED = False
+EMAIL_SMTP_SERVER = "smtp.gmail.com"
+EMAIL_SMTP_PORT = 587
+EMAIL_ADDRESS = ""
+EMAIL_PASSWORD = ""       # App password (não a password normal)
+EMAIL_TO = ""             # Email de destino dos reports
+
+# ============================================================
+#  FOREX FACTORY / ECONOMIC CALENDAR
+# ============================================================
+
+TRADING_ECONOMICS_KEY = ""  # Obter em tradingeconomics.com
+USE_FOREX_FACTORY_SCRAPING = True
+FF_BLOCK_MINUTES_BEFORE = 30  # Bloquear X min antes de evento HIGH
+FF_BLOCK_MINUTES_AFTER = 15   # Bloquear X min depois de evento HIGH
 
 # ============================================================
 #  NOTAS IMPORTANTES
