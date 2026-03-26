@@ -2,28 +2,34 @@
 #  config/settings.py  —  v5  (índices + metais + MTF + portfólio)
 # ============================================================
 
+import os
+from dotenv import load_dotenv
+
+# Carregar variáveis de ambiente do arquivo .env
+load_dotenv()
+
 # --- MT5 ---------------------------------------------------
 MT5_PATH     = r"C:\Program Files\MetaTrader 5 - ActivTrades\terminal64.exe"
-MT5_LOGIN    = 6212361
-MT5_PASSWORD = "AZZmmp5?"
-MT5_SERVER   = "ActivTradesCorp-Server"
+MT5_LOGIN    = int(os.getenv("MT5_LOGIN", 6212361))
+MT5_PASSWORD = os.getenv("MT5_PASSWORD", "AZZmmp5?")
+MT5_SERVER   = os.getenv("MT5_SERVER", "ActivTradesCorp-Server")
 
 # --- API Keys ----------------------------------------------
-FRED_API_KEY      = "583922c6e7d2a106ee1eae29a70b90e0"
-POLYGON_KEY       = "2nC3wlQs0AVj8wF3kgT5jcyCNiIaB2iB"
-ALPHA_VANTAGE_KEY = "4F1D7CD56E2X2NE1"
-TWELVE_DATA_KEY   = "2e602e1a9694451da0218f15a9f47bad"
-FIXER_KEY         = "f47da607354dec69586e1af564bb7221"
-EODHD_KEY         = "69bdafa2818c60.63828076"
-NEWSAPI_KEY       = "3c7be108d2bc47c18e36e5437a76c632"
-FINNHUB_KEY       = "d6uquh1r01qig545jabgd6uquh1r01qig545jac0"
-MARKETAUX_KEY     = "Bc02zKl6R48yom6AtBEfSgMTBj9WMjM1jrRTGHVY"
-CURRENTS_KEY      = "p1ZOufwZzjpunAkPmVDqYU5-Q0Q7XFl_sWRr9rFW5f1bc7Gs"
-MEDIASTACK_KEY    = "fccc2bb417afb7ec2b7a79d6d98100de"
-CRYPTOPANIC_KEY   = "8e33959127c1a228ef55177e1c8ef5d177edb1a7"
-BINANCE_API_KEY   = "q1gbM0TxW5ifubXLEdR7Y6btNEKHeiGd9767WKPtxOz9fSopVwz7lO1M93koRBIV"
-COINGECKO_KEY     = "CG-mKgvMyY9dA9CoW4cPEtG6PGd"
-ETHERSCAN_KEY     = "RNWS7AIBRZEVBRUYZ9GG2Y6VSNEFSEYWM3"
+FRED_API_KEY      = os.getenv("FRED_API_KEY", "583922c6e7d2a106ee1eae29a70b90e0")
+POLYGON_KEY       = os.getenv("POLYGON_KEY", "2nC3wlQs0AVj8wF3kgT5jcyCNiIaB2iB")
+ALPHA_VANTAGE_KEY = os.getenv("ALPHA_VANTAGE_KEY", "4F1D7CD56E2X2NE1")
+TWELVE_DATA_KEY   = os.getenv("TWELVE_DATA_KEY", "2e602e1a9694451da0218f15a9f47bad")
+FIXER_KEY         = os.getenv("FIXER_KEY", "f47da607354dec69586e1af564bb7221")
+EODHD_KEY         = os.getenv("EODHD_KEY", "69bdafa2818c60.63828076")
+NEWSAPI_KEY       = os.getenv("NEWSAPI_KEY", "3c7be108d2bc47c18e36e5437a76c632")
+FINNHUB_KEY       = os.getenv("FINNHUB_KEY", "d6uquh1r01qig545jabgd6uquh1r01qig545jac0")
+MARKETAUX_KEY     = os.getenv("MARKETAUX_KEY", "Bc02zKl6R48yom6AtBEfSgMTBj9WMjM1jrRTGHVY")
+CURRENTS_KEY      = os.getenv("CURRENTS_KEY", "p1ZOufwZzjpunAkPmVDqYU5-Q0Q7XFl_sWRr9rFW5f1bc7Gs")
+MEDIASTACK_KEY    = os.getenv("MEDIASTACK_KEY", "fccc2bb417afb7ec2b7a79d6d98100de")
+CRYPTOPANIC_KEY   = os.getenv("CRYPTOPANIC_KEY", "8e33959127c1a228ef55177e1c8ef5d177edb1a7")
+BINANCE_API_KEY   = os.getenv("BINANCE_API_KEY", "q1gbM0TxW5ifubXLEdR7Y6btNEKHeiGd9767WKPtxOz9fSopVwz7lO1M93koRBIV")
+COINGECKO_KEY     = os.getenv("COINGECKO_KEY", "CG-mKgvMyY9dA9CoW4cPEtG6PGd")
+ETHERSCAN_KEY     = os.getenv("ETHERSCAN_KEY", "RNWS7AIBRZEVBRUYZ9GG2Y6VSNEFSEYWM3")
 
 # --- Fontes de dados ----------------------------------------
 USE_POLYGON_DATA  = False   # plano free não tem intraday
@@ -521,31 +527,32 @@ USE_ORDER_BOOK_FILTER = False
 # Data source weights (ponderacao por tipo de ativo)
 DATA_SOURCE_WEIGHTS = {
     'crypto': {
-        'binance': 0.45,
-        'coingecko': 0.35,
-        'cryptocompare': 0.20
+        'binance': 0.60,      # Peso maior (funciona bem)
+        'coingecko': 0.40,    # Peso maior
+        'cryptocompare': 0.0  # Desativar se não usar
     },
     'forex': {
-        'alpha_vantage': 0.35,
-        'twelve_data': 0.35,
-        'fixer': 0.20,
-        'eodhd': 0.10
+        'alpha_vantage': 0.0, # DESATIVADO (rate limit)
+        'twelve_data': 0.60,  # PESO MAIOR
+        'fixer': 0.40,        # PESO MAIOR
+        'eodhd': 0.0
     },
     'stocks': {
         'yahoo': 0.40,
         'polygon': 0.35,
-        'eodhd': 0.25
+        'eodhd': 0.25,
+        'finnhub': 0.0
     }
 }
 
 # News sentiment sources
 NEWS_SOURCES = {
-    'newsapi': True,
+    'newsapi': False,        # Rate limit esgotado
     'finnhub': True,
     'marketaux': True,
-    'currents': True,
+    'currents': False,       # Falhou
     'mediastack': True,
-    'cryptopanic': True  # Crypto only
+    'cryptopanic': False     # Falhou
 }
 
 # API Health Monitoring
