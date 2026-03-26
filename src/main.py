@@ -7,9 +7,62 @@ import time
 import argparse
 import sys
 import os
+import threading
 from datetime import datetime
 import pandas as pd
 import numpy as np
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+import uvicorn
+
+# FastAPI app para health checks
+health_app = FastAPI()
+
+# Variáveis globais de status
+bot_status = {
+    'status': 'starting',
+    'start_time': datetime.now(),
+    'balance': 0.0,
+    'positions': 0,
+    'last_update': datetime.now()
+}
+
+@health_app.get("/")
+def root():
+    return {"message": "Trading Bot v6 - Running on Railway"}
+
+@health_app.get("/health")
+def health():
+    uptime_seconds = (datetime.now() - bot_status['start_time']).total_seconds()
+    
+    return JSONResponse({
+        "status": bot_status['status'],
+        "uptime_seconds": uptime_seconds,
+        "uptime_hours": uptime_seconds / 3600,
+        "balance": bot_status['balance'],
+        "open_positions": bot_status['positions'],
+        "last_update": bot_status['last_update'].isoformat(),
+        "timestamp": datetime.now().isoformat()
+    })
+
+@health_app.get("/metrics")
+def metrics():
+    """Métricas para monitorização."""
+    return {
+        "balance": bot_status['balance'],
+        "positions": bot_status['positions'],
+        "uptime": (datetime.now() - bot_status['start_time']).total_seconds()
+    }
+
+def run_health_api():
+    """Roda FastAPI em thread separada."""
+    port = int(os.environ.get("PORT", 8765))
+    uvicorn.run(
+        health_app,
+        host="0.0.0.0",
+        port=port,
+        log_level="warning"
+    )
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -637,6 +690,13 @@ def run(mode: str):
     global PAPER_MODE
     PAPER_MODE = (mode == "paper")
 
+    # Iniciar health API em background
+    health_thread = threading.Thread(target=run_health_api, daemon=True)
+    health_thread.start()
+    
+    # Atualizar status
+    bot_status['status'] = 'initializing'
+
     log.setup()
     log.info("A ligar ao MetaTrader 5...")
     if not mt5c.connect():
@@ -796,6 +856,13 @@ def run(mode: str):
             balance = account.get("balance", 0.0)
             equity = account.get("equity", balance)
             dash.update_account(account)
+
+            # Railway Health Status Update
+            open_pos = mt5c.get_open_positions(None, cfg.MAGIC_NUMBER)
+            bot_status['balance'] = balance
+            bot_status['positions'] = len(open_pos) if open_pos else 0
+            bot_status['last_update'] = datetime.now()
+            bot_status['status'] = 'running'
 
             # Data Quality Scorer - Global Health
             risk_multiplier = 1.0
