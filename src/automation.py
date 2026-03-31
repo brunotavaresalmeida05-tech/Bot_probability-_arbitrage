@@ -15,6 +15,12 @@ import os
 import subprocess
 import time
 
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+try:
+    import config.settings as _cfg
+except ImportError:
+    _cfg = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -260,15 +266,11 @@ class DailyReporter:
     
     def should_send_report(self) -> bool:
         """Verifica se deve enviar relatório"""
-        if self.last_report is None:
-            return True
-        
-        # Enviar 1x por dia (às 23:00)
+        report_hour = getattr(_cfg, 'REPORT_TIME_HOUR', 18) if _cfg else 18
         now = datetime.now()
-        if now.hour == 23 and now.minute == 0:
-            if self.last_report.date() < now.date():
+        if now.hour == report_hour and now.minute < 5:
+            if self.last_report is None or self.last_report.date() < now.date():
                 return True
-        
         return False
     
     def collect_stats(self, db_path: str = "data/trades.db") -> dict:
@@ -303,39 +305,94 @@ class DailyReporter:
                 pnl = 0
                 win_rate = 0
             
+            # Best performers today
+            best_query = """
+                SELECT symbol, SUM(profit) as total_pnl
+                FROM trades WHERE DATE(close_time) = ?
+                GROUP BY symbol ORDER BY total_pnl DESC LIMIT 3
+            """
+            best = conn.execute(best_query, (today,)).fetchall()
+            best_strategies = [{'symbol': r[0], 'pnl': r[1]} for r in best]
+
+            conn.close()
+
+            initial_balance = getattr(_cfg, 'INITIAL_CAPITAL', balance) if _cfg else balance
+            daily_pnl_pct = (pnl / initial_balance * 100) if initial_balance > 0 else 0
+            dd_alert = getattr(_cfg, 'REPORT_DRAWDOWN_ALERT_PCT', 2.0) if _cfg else 2.0
+            drawdown_alert = pnl < 0 and abs(daily_pnl_pct) >= dd_alert
+
             return {
                 'balance': balance,
                 'pnl': pnl,
+                'daily_pnl': pnl,
+                'daily_pnl_pct': daily_pnl_pct,
                 'num_trades': num_trades,
-                'win_rate': win_rate
+                'wins': len([p for p in (profits if num_trades > 0 else []) if p > 0]),
+                'losses': len([p for p in (profits if num_trades > 0 else []) if p <= 0]),
+                'win_rate': win_rate,
+                'best_strategies': best_strategies,
+                'drawdown_alert': drawdown_alert,
             }
-        
+
         except Exception as e:
             logger.error(f"❌ Erro ao coletar stats: {e}")
             return {
                 'balance': 0,
                 'pnl': 0,
+                'daily_pnl': 0,
+                'daily_pnl_pct': 0,
                 'num_trades': 0,
-                'win_rate': 0
+                'wins': 0,
+                'losses': 0,
+                'win_rate': 0,
+                'best_strategies': [],
+                'drawdown_alert': False,
             }
     
     def send_report(self):
         """Envia relatório"""
         if not self.should_send_report():
             return
-        
+
         logger.info("📊 Gerando relatório diário...")
-        
+
         stats = self.collect_stats()
-        
+
+        # Drawdown alert
+        if stats.get('drawdown_alert'):
+            dd_pct = abs(stats.get('daily_pnl_pct', 0))
+            logger.warning(f"⚠ DRAWDOWN ALERT: -{dd_pct:.1f}% hoje")
+            if self.telegram:
+                self.telegram.notify_drawdown_warning(dd_pct, stats['balance'])
+
         if self.telegram:
             self.telegram.send_daily_report(stats)
-        
+
         if self.email:
+            # EmailNotifier (automation.py) path
             self.email.send_daily_report(stats)
-        
+        elif _cfg and getattr(_cfg, 'REPORT_EMAIL_FROM', ''):
+            # Fallback: use EmailReporter from notifications
+            try:
+                from src.notifications.email_reporter import EmailReporter
+                reporter = EmailReporter(
+                    smtp_server=_cfg.REPORT_SMTP_SERVER,
+                    smtp_port=_cfg.REPORT_SMTP_PORT,
+                    email=_cfg.REPORT_EMAIL_FROM,
+                    password=_cfg.REPORT_EMAIL_PASSWORD,
+                )
+                html = reporter.generate_daily_report(stats)
+                subject = (
+                    f"Trading Bot V6 — Relatório {datetime.now().strftime('%d/%m/%Y')} | "
+                    f"P&L: {'%+.2f' % stats['pnl']}€"
+                )
+                reporter.send_report(_cfg.REPORT_EMAIL_TO, subject, html)
+                logger.info("✅ Email diário enviado!")
+            except Exception as e:
+                logger.error(f"❌ Falha ao enviar email: {e}")
+
         self.last_report = datetime.now()
-        logger.info("✅ Relatório enviado!")
+        logger.info(f"✅ Relatório enviado! | Balance: €{stats['balance']:.2f} | P&L: {stats['pnl']:+.2f}€")
 
 
 class ConfigBackup:

@@ -27,21 +27,47 @@ import config.settings as cfg
 class StrategyManager:
     """
     Gerencia múltiplas estratégias simultaneamente.
-    
+
     Funcionalidades:
     - Combina sinais de todas as estratégias
     - Aloca capital proporcionalmente ao Sharpe
     - Evita conflitos entre estratégias
     - Tracking de performance individual
+    - ML predictor filter (RandomForest per symbol)
     """
-    
+
     def __init__(self):
         self.strategies = {}
         self.strategy_weights = {}
         self.strategy_performance = {}
-        
-        # Importar estratégias
+        self.last_signals = []   # exposed for live_state_writer
+
+        # ML predictors per symbol {symbol: PricePredictor}
+        self.ml_predictors: dict = {}
+        self._load_ml_predictors()
+
+        # Import strategies
         self._initialize_strategies()
+
+    # ── ML predictor loading ──────────────────────────────────
+
+    def _load_ml_predictors(self):
+        """Load trained ML models for each active symbol (if available)."""
+        try:
+            from src.ml.price_predictor import PricePredictor
+            active = getattr(cfg, 'ACTIVE_SYMBOLS', getattr(cfg, 'SYMBOLS', []))
+            loaded = 0
+            for sym in active:
+                path = f'data/models/{sym.lower()}_ml.pkl'
+                if os.path.exists(path):
+                    p = PricePredictor(model_path=path)
+                    if p.is_trained:
+                        self.ml_predictors[sym] = p
+                        loaded += 1
+            if loaded:
+                print(f"ML predictors loaded: {loaded}/{len(active)} symbols")
+        except Exception as e:
+            print(f"ML predictor load skipped: {e}")
     
     def _initialize_strategies(self):
         """Inicializa todas as estratégias disponíveis."""
@@ -198,13 +224,68 @@ class StrategyManager:
         
         # Decisão de qual estratégia usar
         chosen_strategy, chosen_signal = self._select_best_signal(all_signals)
-        
+
+        base_signal = chosen_signal.get('signal') if chosen_signal else None
+        confidence  = self._calculate_confidence(chosen_signal)
+
+        # ── ML Predictor Filter ───────────────────────────────
+        ml_result = self._apply_ml_filter(symbol, df, base_signal, confidence)
+        final_signal = ml_result['signal']
+        final_conf   = ml_result['confidence']
+
+        # Expose last signals for dashboard
+        if final_signal in ('BUY', 'SELL'):
+            self.last_signals = [{
+                'symbol':     symbol,
+                'signal':     final_signal,
+                'direction':  final_signal,
+                'strategy':   chosen_strategy or 'consensus',
+                'confidence': round(final_conf, 3),
+            }]
+
         return {
-            'strategy': chosen_strategy,
-            'signal': chosen_signal.get('signal') if chosen_signal else None,
-            'confidence': self._calculate_confidence(chosen_signal),
-            'all_signals': all_signals
+            'strategy':   chosen_strategy,
+            'signal':     final_signal,
+            'confidence': final_conf,
+            'all_signals': all_signals,
+            'ml_result':  ml_result.get('ml_direction'),
         }
+
+    # ── ML filter implementation ──────────────────────────────
+
+    def _apply_ml_filter(self, symbol: str, df, signal: str, confidence: float) -> dict:
+        """
+        Applies ML predictor as a confirmation filter.
+        - If ML agrees:  confidence boosted +20%, signal passes
+        - If ML disagrees: signal blocked (returns None)
+        - If no model:  signal passes unchanged
+        """
+        predictor = self.ml_predictors.get(symbol)
+        if predictor is None or signal not in ('BUY', 'SELL'):
+            return {'signal': signal, 'confidence': confidence, 'ml_direction': None}
+
+        try:
+            ml = predictor.predict(df)
+            ml_dir = ml['direction']  # 1=UP, -1=DOWN, 0=neutral
+            ml_conf = ml['confidence']
+
+            # Only apply filter when ML is confident enough
+            if ml_conf < 0.55:
+                return {'signal': signal, 'confidence': confidence, 'ml_direction': ml_dir}
+
+            signal_to_ml = {'BUY': 1, 'SELL': -1}
+            agrees = (signal_to_ml.get(signal, 0) == ml_dir)
+
+            if agrees:
+                boosted = min(confidence * 1.2, 1.0)
+                return {'signal': signal, 'confidence': boosted, 'ml_direction': ml_dir}
+            else:
+                print(f"[ML] {symbol}: {signal} blocked — ML predicts {'UP' if ml_dir==1 else 'DOWN' if ml_dir==-1 else 'NEUTRAL'} "
+                      f"(conf={ml_conf:.0%})")
+                return {'signal': None, 'confidence': 0.0, 'ml_direction': ml_dir}
+
+        except Exception as e:
+            return {'signal': signal, 'confidence': confidence, 'ml_direction': None}
     
     def _select_best_signal(self, all_signals: Dict) -> tuple:
         """

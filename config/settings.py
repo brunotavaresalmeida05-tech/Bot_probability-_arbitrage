@@ -36,8 +36,11 @@ SL_ATR_MULT = 2.0
 # Risk Management
 MAX_RISK_PER_TRADE = 0.02
 MAX_POSITIONS = 5
+MAX_OPEN_POSITIONS = 3       # Máximo posições simultâneas abertas
 POSITION_SIZE = 0.01
-MAX_DAILY_LOSS_PCT = 5.0  # Limite de perda diária (5%)
+MAX_DAILY_LOSS_PCT = 3.0     # Limite de perda diária (3% = ~€14 com €472)
+MAX_DAILY_TRADES = 10        # Máximo trades abertos por dia
+MAX_WEEKLY_LOSS_PCT = 8.0    # Limite semanal (8%)
 
 # Magic Number
 MAGIC_NUMBER = 123456
@@ -69,11 +72,36 @@ ALL_AVAILABLE_SYMBOLS = [
 # ============================================================
 SYMBOLS = ALL_AVAILABLE_SYMBOLS  # Alias para compatibilidade
 
+# ── Active trading symbols (curated for current capital tier) ─
+# At seed/milestone 1 (€462-€1000): trade only best 5 pairs
+# USDCHF disabled until win rate improves; NZDUSD added (AUD correlated)
+ACTIVE_SYMBOLS = [
+    'EURUSD',  # Sharpe 0.84 — stable, high liquidity
+    'GBPUSD',  # Sharpe 0.81 — active
+    'USDJPY',  # Sharpe 0.73 — active
+    'AUDUSD',  # Sharpe 1.77 — best performer
+    'NZDUSD',  # AUD-correlated — added at Milestone 1
+]
+
+# ── Lot multiplier per pair (reduce size for new/unproven pairs) ─
+LOT_MULTIPLIER_BY_PAIR = {
+    'EURUSD': 1.0,   # Full size — proven edge
+    'GBPUSD': 1.0,   # Full size — proven edge
+    'USDJPY': 1.0,   # Full size — proven edge
+    'AUDUSD': 0.5,   # Half size — first 20 trades to confirm edge
+    'NZDUSD': 0.5,   # Half size — first 20 trades to confirm edge
+    'USDCHF': 0.3,   # Reduced — underperformer, watch-only
+    'USDCAD': 1.0,   # Full size — Sharpe 2.54
+    'EURGBP': 1.0,   # Full size — Sharpe 6.0
+    'GBPJPY': 1.0,   # Full size — Sharpe 2.24
+}
+
 # ============================================================
 #  FEATURES - SIMPLIFICADO
 # ============================================================
 USE_REGIME_FILTER = False       # DESATIVADO
-USE_NEWS_FILTER = False          # DESATIVADO
+USE_NEWS_FILTER = True           # ATIVADO — bloqueia 30min antes / 15min após eventos
+USE_FOREX_FACTORY_SCRAPING = True  # ATIVADO — calendário FF + Finnhub
 USE_MULTI_API_CONSENSUS = False  # DESATIVADO
 MONITOR_API_HEALTH = False       # DESATIVADO
 USE_DATA_QUALITY_SCORER = False  # DESATIVADO
@@ -293,6 +321,16 @@ USE_COMPOUNDING = True
 TARGET_MONTHLY_RETURN = 0.15  # 15% conservador (ou 0.25 agressivo)
 INITIAL_CAPITAL = 464.63  # Capital inicial atual
 
+# ── Retail Milestones (small account €462 → €5000+) ──────────
+# Cada tier define o lot base e o risco % por trade
+RETAIL_MILESTONES = [
+    {'name': 'Seed',        'min': 0,     'max': 500,   'base_lot': 0.02, 'risk_pct': 1.0},
+    {'name': 'Milestone 1', 'min': 500,   'max': 1000,  'base_lot': 0.03, 'risk_pct': 1.0},
+    {'name': 'Milestone 2', 'min': 1000,  'max': 2500,  'base_lot': 0.06, 'risk_pct': 1.0},
+    {'name': 'Milestone 3', 'min': 2500,  'max': 5000,  'base_lot': 0.12, 'risk_pct': 1.0},
+    {'name': 'Target',      'min': 5000,  'max': float('inf'), 'base_lot': 0.25, 'risk_pct': 1.0},
+]
+
 # Kelly Criterion
 USE_KELLY_SIZING = True
 KELLY_MIN_TRADES = 30  # Mínimo de trades para calcular Kelly
@@ -303,7 +341,7 @@ ANTI_MARTINGALE_MAX_MULTIPLIER = 4.0
 
 # Pyramiding (adicionar em vencedores)
 PYRAMIDING_ENABLED = True
-PYRAMIDING_MAX_ADDS = 3
+PYRAMIDING_MAX_ADDS = 2
 PYRAMIDING_MIN_PROFIT_PCT = 0.02  # 2%
 PYRAMIDING_SIZE_MULTIPLIER = 0.5  # Cada add = 50% do inicial
 
@@ -374,12 +412,58 @@ RESTART_COOLDOWN_MIN = 5
 
 # Daily reports
 DAILY_REPORT_ENABLED = True
-REPORT_TIME_HOUR = 23  # 23:00
+REPORT_TIME_HOUR = 18       # 18:00 — relatório diário
+REPORT_DRAWDOWN_ALERT_PCT = 2.0  # Alerta se drawdown diário > 2%
+
+# Email report credentials (set in .env)
+REPORT_EMAIL_FROM     = os.getenv('REPORT_EMAIL_FROM', '')
+REPORT_EMAIL_PASSWORD = os.getenv('REPORT_EMAIL_PASSWORD', '')
+REPORT_EMAIL_TO       = os.getenv('REPORT_EMAIL_TO', REPORT_EMAIL_FROM)
+REPORT_SMTP_SERVER    = os.getenv('REPORT_SMTP_SERVER', 'smtp.gmail.com')
+REPORT_SMTP_PORT      = int(os.getenv('REPORT_SMTP_PORT', '587'))
 
 # Config backup
 AUTO_BACKUP_ENABLED = True
 BACKUP_INTERVAL_HOURS = 24
 
+
+# ============================================================
+#  MISSING PARAMETERS (required by src/strategy.py)
+# ============================================================
+
+USE_STDDEV           = True         # True = stddev denominator, False = ATR-based
+ATR_MULT_FOR_Z       = 1.0          # ATR multiplier when USE_STDDEV = False
+SYMBOLS_24_7         = ['BTCUSD', 'ETHUSD', 'XRPUSD', 'SOLUSD']  # Crypto trades 24/7
+SESSION_START_HOUR   = 7            # Trading session start (UTC)
+SESSION_END_HOUR     = 21           # Trading session end (UTC)
+MAX_TRADES_PER_DAY   = 10           # Max trades per symbol per day
+MAX_CONSECUTIVE_LOSSES = 5          # Pause after N consecutive losses
+USE_Z_STOP           = True         # Use Z-score for stop loss
+USE_ATR_STOP         = False        # Use ATR for stop loss (fallback)
+MACRO_LOT_MAX_MULT   = 2.0          # Max lot multiplier from macro engine
+
+# ============================================================
+#  Z-SCORE THRESHOLDS BY PAIR (Phase 3 optimisation)
+# ============================================================
+Z_SCORE_BY_PAIR = {
+    'EURUSD': {'entry': 1.8, 'exit': 0.4, 'lookback': 20},  # Sharpe 0.84 — slightly aggressive
+    'GBPUSD': {'entry': 2.2, 'exit': 0.6, 'lookback': 25},  # More volatile — conservative
+    'USDJPY': {'entry': 2.0, 'exit': 0.5, 'lookback': 20},  # Standard
+    'AUDUSD': {'entry': 1.9, 'exit': 0.5, 'lookback': 18},  # Sharpe 1.77 — slightly aggressive
+    'USDCHF': {'entry': 2.3, 'exit': 0.7, 'lookback': 30},  # Underperformer — conservative
+    'USDCAD': {'entry': 1.8, 'exit': 0.4, 'lookback': 18},  # Sharpe 2.54 — aggressive
+    'NZDUSD': {'entry': 2.5, 'exit': 0.8, 'lookback': 30},  # Sharpe -0.21 — very conservative
+    'EURGBP': {'entry': 1.6, 'exit': 0.3, 'lookback': 15},  # Sharpe 6.0 — most aggressive
+    'EURJPY': {'entry': 2.5, 'exit': 0.8, 'lookback': 30},  # Sharpe -0.23 — conservative
+    'GBPJPY': {'entry': 1.9, 'exit': 0.5, 'lookback': 20},  # Sharpe 2.24 — aggressive
+    'AUDJPY': {'entry': 2.4, 'exit': 0.7, 'lookback': 28},  # Sharpe -0.15 — conservative
+    'GOLD':   {'entry': 2.5, 'exit': 0.8, 'lookback': 30},  # Underperformer
+    'SILVER': {'entry': 2.5, 'exit': 0.8, 'lookback': 30},  # Underperformer
+    'BTCUSD': {'entry': 2.5, 'exit': 0.8, 'lookback': 30},  # Negative Sharpe
+    'ETHUSD': {'entry': 2.2, 'exit': 0.6, 'lookback': 25},  # Borderline
+    'XRPUSD': {'entry': 2.0, 'exit': 0.5, 'lookback': 20},  # Sharpe 1.07
+    'SOLUSD': {'entry': 2.1, 'exit': 0.5, 'lookback': 22},  # Sharpe 0.70
+}
 
 # ============================================================
 #  SPREAD FILTER

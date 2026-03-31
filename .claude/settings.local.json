@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3 -m py_compile src/*.py)"
+      "Bash(python3 -m py_compile src/*.py)",
+      "Bash(python -c \"import sys; sys.path.insert\\(0,''src''\\); import strategy; print\\(''strategy.py OK''\\); print\\(''get_z_params EURUSD:'', strategy.get_z_params_for_symbol\\(''EURUSD''\\)\\); print\\(''get_z_params UNKNOWN:'', strategy.get_z_params_for_symbol\\(''UNKNOWN''\\)\\)\")",
+      "Bash(python -c \":*)"
     ]
   }
 }

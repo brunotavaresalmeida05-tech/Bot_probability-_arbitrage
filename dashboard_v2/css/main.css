@@ -1,0 +1,340 @@
+/* main.css - Trading Bot V6 Dashboard */
+
+:root {
+    --bg:        #0d1117;
+    --bg2:       #161b22;
+    --bg3:       #21262d;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --text-muted:#8b949e;
+    --green:     #3fb950;
+    --red:       #f85149;
+    --blue:      #58a6ff;
+    --orange:    #d29922;
+    --purple:    #bc8cff;
+    --sidebar-w: 220px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    min-height: 100vh;
+    font-size: 14px;
+}
+
+/* ─── Sidebar ─────────────────────────────────────────────── */
+.sidebar {
+    width: var(--sidebar-w);
+    background: var(--bg2);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    z-index: 100;
+}
+
+.sidebar-header {
+    padding: 20px 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--blue);
+}
+
+.logo i { font-size: 18px; }
+
+.sidebar-menu {
+    padding: 12px 0;
+    flex: 1;
+}
+
+.menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    color: var(--text-muted);
+    text-decoration: none;
+    border-radius: 6px;
+    margin: 2px 8px;
+    transition: all 0.15s;
+}
+
+.menu-item:hover { background: var(--bg3); color: var(--text); }
+.menu-item.active { background: var(--blue)22; color: var(--blue); }
+.menu-item i { width: 18px; text-align: center; }
+
+.sidebar-footer {
+    padding: 16px;
+    border-top: 1px solid var(--border);
+}
+
+/* ─── Main Content ────────────────────────────────────────── */
+.main-content {
+    margin-left: var(--sidebar-w);
+    flex: 1;
+    padding: 24px;
+    max-width: 1400px;
+}
+
+.page { display: none; }
+.page.active { display: block; }
+
+.page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.page-header h1 {
+    font-size: 22px;
+    font-weight: 600;
+}
+
+.update-time {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+/* ─── Cards ───────────────────────────────────────────────── */
+.card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.card-header h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.card-header h3 i { margin-right: 6px; }
+
+/* ─── KPI Grid ────────────────────────────────────────────── */
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.kpi-grid.small { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+
+.kpi-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    transition: border-color 0.2s;
+}
+
+.kpi-card:hover { border-color: var(--blue); }
+.kpi-card.small { padding: 14px; }
+
+.kpi-icon {
+    width: 40px; height: 40px;
+    border-radius: 8px;
+    background: var(--bg3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: var(--blue);
+    flex-shrink: 0;
+}
+
+.kpi-icon.green { color: var(--green); }
+.kpi-icon.orange { color: var(--orange); }
+.kpi-icon.purple { color: var(--purple); }
+.kpi-icon.red { color: var(--red); }
+
+.kpi-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+}
+
+.kpi-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+/* ─── Milestone ───────────────────────────────────────────── */
+.milestone-card .card-header span {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--orange);
+}
+
+.progress-bar-wrap {
+    background: var(--bg3);
+    border-radius: 100px;
+    height: 10px;
+    overflow: hidden;
+    margin: 10px 0;
+}
+
+.progress-bar {
+    background: linear-gradient(90deg, var(--blue), var(--green));
+    height: 100%;
+    border-radius: 100px;
+    transition: width 1s ease;
+}
+
+.milestone-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.milestone-meta #milestone-pct {
+    font-weight: 700;
+    color: var(--green);
+}
+
+/* ─── Chart ───────────────────────────────────────────────── */
+.chart-card { }
+.chart-wrap { height: 280px; position: relative; }
+
+/* ─── Tables ──────────────────────────────────────────────── */
+.table-wrap { overflow-x: auto; }
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table th {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.data-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border)55;
+    vertical-align: middle;
+}
+
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: var(--bg3)55; }
+
+.empty-row {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 32px !important;
+}
+
+/* ─── Badges ──────────────────────────────────────────────── */
+.badge {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 2px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.tag-buy  { color: var(--green); font-weight: 700; }
+.tag-sell { color: var(--red);   font-weight: 700; }
+.pnl-pos  { color: var(--green); font-weight: 600; }
+.pnl-neg  { color: var(--red);   font-weight: 600; }
+
+/* ─── WebSocket badge ─────────────────────────────────────── */
+.ws-badge {
+    font-size: 11px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    text-align: center;
+}
+
+.ws-connecting { background: var(--bg3); color: var(--text-muted); }
+.ws-connected   { background: var(--green)22; color: var(--green); }
+.ws-error       { background: var(--red)22;   color: var(--red); }
+
+/* ─── Signals ─────────────────────────────────────────────── */
+.signal-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    background: var(--bg3);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    border-left: 3px solid var(--border);
+}
+
+.signal-card.buy  { border-left-color: var(--green); }
+.signal-card.sell { border-left-color: var(--red); }
+
+.signal-sym   { font-weight: 700; font-size: 15px; }
+.signal-meta  { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.signal-dir   { font-size: 13px; font-weight: 700; padding: 4px 12px; border-radius: 6px; }
+.signal-dir.buy  { background: var(--green)22; color: var(--green); }
+.signal-dir.sell { background: var(--red)22;   color: var(--red); }
+.signal-conf  { font-size: 12px; color: var(--text-muted); margin-top: 4px; text-align: right; }
+
+/* ─── Spreads Grid ────────────────────────────────────────── */
+.spreads-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px;
+}
+
+.spread-item {
+    background: var(--bg3);
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: center;
+}
+
+.spread-sym  { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+.spread-val  { font-size: 16px; font-weight: 700; margin-top: 2px; }
+.spread-val.ok   { color: var(--green); }
+.spread-val.high { color: var(--red); }
+
+/* ─── Empty state ─────────────────────────────────────────── */
+.empty-state {
+    text-align: center;
+    padding: 48px;
+    color: var(--text-muted);
+}
+
+.empty-state i { font-size: 32px; margin-bottom: 12px; display: block; }

@@ -1,0 +1,49 @@
+/* components.css - Additional component styles */
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* Pulsing dot for live indicator */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+}
+
+.ws-connected .fa-circle { animation: pulse 2s infinite; }
+
+/* Number transitions */
+.kpi-value { transition: color 0.3s; }
+
+/* Responsive */
+@media (max-width: 768px) {
+    :root { --sidebar-w: 60px; }
+    .sidebar-menu .menu-item span,
+    .logo span,
+    .sidebar-footer .ws-badge { display: none; }
+    .menu-item { justify-content: center; }
+    .logo { justify-content: center; }
+    .main-content { padding: 16px; }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Flash animation for data updates */
+@keyframes flash-green {
+    0%   { background: var(--green)33; }
+    100% { background: transparent; }
+}
+
+@keyframes flash-red {
+    0%   { background: var(--red)33; }
+    100% { background: transparent; }
+}
+
+.flash-green { animation: flash-green 0.6s ease; }
+.flash-red   { animation: flash-red 0.6s ease; }
+
+/* Win rate color helpers */
+.wr-good { color: var(--green); }
+.wr-ok   { color: var(--orange); }
+.wr-bad  { color: var(--red); }

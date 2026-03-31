@@ -137,33 +137,50 @@ def trading_allowed(symbol: str, state: DailyState,
 #  SINAL
 # ─────────────────────────────────────────────
 
-def get_signal(z: float, ma_last: float, close_last: float) -> Optional[str]:
+def get_z_params_for_symbol(symbol: Optional[str]) -> dict:
+    """
+    Returns per-pair Z-score thresholds from cfg.Z_SCORE_BY_PAIR.
+    Falls back to global defaults if the pair is not in the dict.
+    """
+    defaults = {'entry': cfg.Z_ENTER, 'exit': cfg.Z_EXIT, 'lookback': cfg.STDDEV_PERIOD}
+    if not symbol:
+        return defaults
+    pairs = getattr(cfg, 'Z_SCORE_BY_PAIR', {})
+    return pairs.get(symbol.upper(), defaults)
+
+
+def get_signal(z: float, ma_last: float, close_last: float,
+               symbol: Optional[str] = None) -> Optional[str]:
     """
     Retorna "BUY", "SELL", ou None.
-    Z <= -Z_ENTER e close < ma → BUY (preço muito abaixo da média)
-    Z >= +Z_ENTER e close > ma → SELL
+    Z <= -z_entry e close < ma → BUY
+    Z >= +z_entry e close > ma → SELL
+    Uses per-pair thresholds from Z_SCORE_BY_PAIR when symbol is provided.
     """
     if pd.isna(z):
         return None
-    if z <= -cfg.Z_ENTER and close_last < ma_last:
+    z_entry = get_z_params_for_symbol(symbol)['entry']
+    if z <= -z_entry and close_last < ma_last:
         return "BUY"
-    if z >= cfg.Z_ENTER and close_last > ma_last:
+    if z >= z_entry and close_last > ma_last:
         return "SELL"
     return None
 
 
-def should_exit(position_type: str, z: float, price: float, ma_last: float) -> Tuple[bool, str]:
-    """Retorna (fechar?, motivo)."""
+def should_exit(position_type: str, z: float, price: float, ma_last: float,
+                symbol: Optional[str] = None) -> Tuple[bool, str]:
+    """Retorna (fechar?, motivo). Uses per-pair Z_EXIT when symbol is provided."""
     if pd.isna(z):
         return False, ""
+    z_exit = get_z_params_for_symbol(symbol)['exit']
     if position_type == "BUY":
-        if z >= -cfg.Z_EXIT:
-            return True, f"Z reverteu ({z:.3f} >= -{cfg.Z_EXIT})"
+        if z >= -z_exit:
+            return True, f"Z reverteu ({z:.3f} >= -{z_exit})"
         if price >= ma_last:
             return True, "preço cruzou MA para cima"
     elif position_type == "SELL":
-        if z <= cfg.Z_EXIT:
-            return True, f"Z reverteu ({z:.3f} <= {cfg.Z_EXIT})"
+        if z <= z_exit:
+            return True, f"Z reverteu ({z:.3f} <= {z_exit})"
         if price <= ma_last:
             return True, "preço cruzou MA para baixo"
     return False, ""

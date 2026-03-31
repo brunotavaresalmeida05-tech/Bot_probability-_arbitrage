@@ -1,6 +1,7 @@
 """
 capital_scaling.py
 Sistema de scaling de capital institucional com tiers dinâmicos.
+Inclui também retail milestones para contas pequenas (€462 → €5000+).
 À medida que o capital cresce, o sistema ajusta automaticamente:
 - Risco por trade
 - Número de ativos operados
@@ -8,8 +9,54 @@ Sistema de scaling de capital institucional com tiers dinâmicos.
 - Estratégias ativas
 """
 
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import config.settings as cfg
 from typing import Dict, Tuple, List
 from datetime import datetime
+
+
+# ─── Retail Milestone Scaling ─────────────────────────────────
+
+def get_retail_milestone(balance: float) -> dict:
+    """
+    Returns the active retail milestone for the given balance.
+    Reads RETAIL_MILESTONES from config/settings.py.
+    """
+    milestones = getattr(cfg, 'RETAIL_MILESTONES', [
+        {'name': 'Seed',        'min': 0,    'max': 500,          'base_lot': 0.02, 'risk_pct': 1.0},
+        {'name': 'Milestone 1', 'min': 500,  'max': 1000,         'base_lot': 0.03, 'risk_pct': 1.0},
+        {'name': 'Milestone 2', 'min': 1000, 'max': 2500,         'base_lot': 0.06, 'risk_pct': 1.0},
+        {'name': 'Milestone 3', 'min': 2500, 'max': 5000,         'base_lot': 0.12, 'risk_pct': 1.0},
+        {'name': 'Target',      'min': 5000, 'max': float('inf'), 'base_lot': 0.25, 'risk_pct': 1.0},
+    ])
+    for m in milestones:
+        if m['min'] <= balance < m['max']:
+            return m
+    return milestones[-1]
+
+
+def get_retail_lot_size(balance: float, volatility_mult: float = 1.0) -> float:
+    """
+    Returns the base lot size for a retail account based on current balance milestone.
+
+    Args:
+        balance: Current account balance in EUR/USD
+        volatility_mult: Scale down in high-volatility environments (default 1.0 = no change)
+
+    Returns:
+        float: Recommended base lot size (e.g. 0.02)
+    """
+    milestone = get_retail_milestone(balance)
+    base_lot = milestone['base_lot']
+    adjusted = base_lot / max(volatility_mult, 0.1)
+    return round(max(adjusted, 0.01), 2)
+
+
+def get_retail_max_risk(balance: float) -> float:
+    """Returns risk amount in currency units for the current milestone (1% of balance)."""
+    milestone = get_retail_milestone(balance)
+    return round(balance * milestone['risk_pct'] / 100, 2)
 
 
 class CapitalScaling:

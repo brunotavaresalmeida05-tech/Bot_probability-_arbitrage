@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Bot V6 - Dashboard</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <i class="fas fa-chart-line"></i>
+                <span>TradingBot V6</span>
+            </div>
+        </div>
+        <div class="sidebar-menu">
+            <a href="#" class="menu-item active" data-page="home">
+                <i class="fas fa-home"></i><span>Geral</span>
+            </a>
+            <a href="#" class="menu-item" data-page="portfolio">
+                <i class="fas fa-briefcase"></i><span>Portfolio</span>
+            </a>
+            <a href="#" class="menu-item" data-page="execution">
+                <i class="fas fa-bolt"></i><span>Execução</span>
+            </a>
+            <a href="#" class="menu-item" data-page="history">
+                <i class="fas fa-history"></i><span>Histórico</span>
+            </a>
+        </div>
+        <div class="sidebar-footer">
+            <div id="ws-status" class="ws-badge ws-connecting">
+                <i class="fas fa-circle"></i> Connecting...
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+        <!-- ══ PAGE: GERAL ══ -->
+        <div class="page active" id="page-home">
+            <div class="page-header">
+                <h1>Visão Geral</h1>
+                <span id="last-update" class="update-time">—</span>
+            </div>
+
+            <!-- KPI Cards -->
+            <div class="kpi-grid">
+                <div class="kpi-card">
+                    <div class="kpi-icon"><i class="fas fa-wallet"></i></div>
+                    <div class="kpi-body">
+                        <div class="kpi-label">Balance</div>
+                        <div class="kpi-value" id="kpi-balance">€0.00</div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon green"><i class="fas fa-coins"></i></div>
+                    <div class="kpi-body">
+                        <div class="kpi-label">Equity</div>
+                        <div class="kpi-value" id="kpi-equity">€0.00</div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon blue"><i class="fas fa-layer-group"></i></div>
+                    <div class="kpi-body">
+                        <div class="kpi-label">Posições Abertas</div>
+                        <div class="kpi-value" id="kpi-positions">0</div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon orange"><i class="fas fa-trophy"></i></div>
+                    <div class="kpi-body">
+                        <div class="kpi-label">Win Rate</div>
+                        <div class="kpi-value" id="kpi-winrate">0%</div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon purple"><i class="fas fa-chart-bar"></i></div>
+                    <div class="kpi-body">
+                        <div class="kpi-label">Lucro Total</div>
+                        <div class="kpi-value" id="kpi-profit">€0.00</div>
+                    </div>
+                </div>
+                <div class="kpi-card">
+                    <div class="kpi-icon red"><i class="fas fa-exchange-alt"></i></div>
+                    <div class="kpi-body">
+                        <div class="kpi-label">Total Trades</div>
+                        <div class="kpi-value" id="kpi-trades">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Milestone Progress -->
+            <div class="card milestone-card">
+                <div class="card-header">
+                    <h3><i class="fas fa-flag-checkered"></i> Milestone Capital</h3>
+                    <span id="milestone-label">€500</span>
+                </div>
+                <div class="progress-bar-wrap">
+                    <div class="progress-bar" id="milestone-bar" style="width:0%"></div>
+                </div>
+                <div class="milestone-meta">
+                    <span id="milestone-current">€0</span>
+                    <span id="milestone-pct">0%</span>
+                    <span id="milestone-target">€500</span>
+                </div>
+            </div>
+
+            <!-- Equity Curve -->
+            <div class="card chart-card">
+                <div class="card-header">
+                    <h3><i class="fas fa-chart-area"></i> Equity Curve</h3>
+                </div>
+                <div class="chart-wrap">
+                    <canvas id="equity-chart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══ PAGE: PORTFOLIO ══ -->
+        <div class="page" id="page-portfolio">
+            <div class="page-header">
+                <h1>Portfolio</h1>
+                <span class="update-time" id="portfolio-update">—</span>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-list"></i> Posições Abertas</h3>
+                    <span class="badge" id="pos-count">0</span>
+                </div>
+                <div class="table-wrap">
+                    <table class="data-table" id="positions-table">
+                        <thead>
+                            <tr>
+                                <th>Símbolo</th>
+                                <th>Tipo</th>
+                                <th>Lote</th>
+                                <th>Preço Entrada</th>
+                                <th>Preço Atual</th>
+                                <th>P&amp;L</th>
+                                <th>Swap</th>
+                            </tr>
+                        </thead>
+                        <tbody id="positions-body">
+                            <tr><td colspan="7" class="empty-row">Sem posições abertas</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Open P&L Summary -->
+            <div class="card">
+                <div class="card-header"><h3>Resumo P&amp;L Aberto</h3></div>
+                <div class="kpi-grid small">
+                    <div class="kpi-card small">
+                        <div class="kpi-label">Lucro Flutuante</div>
+                        <div class="kpi-value" id="open-pnl">€0.00</div>
+                    </div>
+                    <div class="kpi-card small">
+                        <div class="kpi-label">Margem Livre</div>
+                        <div class="kpi-value" id="free-margin">€0.00</div>
+                    </div>
+                    <div class="kpi-card small">
+                        <div class="kpi-label">Nível de Margem</div>
+                        <div class="kpi-value" id="margin-level">0%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══ PAGE: EXECUÇÃO ══ -->
+        <div class="page" id="page-execution">
+            <div class="page-header">
+                <h1>Execução / Sinais</h1>
+                <span class="update-time" id="exec-update">—</span>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-signal"></i> Sinais Activos</h3>
+                    <span class="badge" id="signals-count">0</span>
+                </div>
+                <div id="signals-container">
+                    <div class="empty-state">
+                        <i class="fas fa-satellite-dish"></i>
+                        <p>Sem sinais activos</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Spreads -->
+            <div class="card">
+                <div class="card-header"><h3><i class="fas fa-arrows-alt-h"></i> Spreads ao Vivo</h3></div>
+                <div id="spreads-grid" class="spreads-grid"></div>
+            </div>
+        </div>
+
+        <!-- ══ PAGE: HISTÓRICO ══ -->
+        <div class="page" id="page-history">
+            <div class="page-header">
+                <h1>Histórico de Trades</h1>
+            </div>
+
+            <!-- Stats per strategy -->
+            <div class="card">
+                <div class="card-header"><h3><i class="fas fa-brain"></i> Performance por Estratégia</h3></div>
+                <div class="table-wrap">
+                    <table class="data-table" id="strategy-table">
+                        <thead>
+                            <tr>
+                                <th>Estratégia</th>
+                                <th>Total</th>
+                                <th>Wins</th>
+                                <th>Win Rate</th>
+                                <th>Lucro Total</th>
+                                <th>Avg Trade</th>
+                            </tr>
+                        </thead>
+                        <tbody id="strategy-body">
+                            <tr><td colspan="6" class="empty-row">A carregar...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Trade history table -->
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-table"></i> Últimos Trades</h3>
+                </div>
+                <div class="table-wrap">
+                    <table class="data-table" id="history-table">
+                        <thead>
+                            <tr>
+                                <th>Símbolo</th>
+                                <th>Direcção</th>
+                                <th>Lotes</th>
+                                <th>Estratégia</th>
+                                <th>P&amp;L</th>
+                                <th>Fecho</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-body">
+                            <tr><td colspan="6" class="empty-row">A carregar...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script src="js/websocket.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

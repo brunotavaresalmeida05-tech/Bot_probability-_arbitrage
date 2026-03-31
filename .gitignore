@@ -22,3 +22,10 @@ Thumbs.db
 
 # Env
 .env
+
+# Data and Backups
+data/*.json
+*.bak*
+data/*.db
+data/*.csv
+data/models/*.pkl

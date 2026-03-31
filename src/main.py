@@ -90,6 +90,7 @@ from src.strategies.inside_bar import InsideBarStrategy
 from src.strategies.engulfing import EngulfingStrategy
 from src.strategies.fibonacci import FibonacciStrategy
 import src.strategy as strat
+from src.capital_scaling import get_retail_lot_size, get_retail_milestone
 
 # Compounding, Anti-Martingale e Volatility Scaler (globais)
 compounding_mgr = None
@@ -151,7 +152,10 @@ volume_filter = VolumeFilter()
 kelly = KellyCalculator(fractional_kelly=0.25)
 dynamic_stops = DynamicStops()
 portfolio_heat = PortfolioHeat(max_heat_pct=15.0)
-dd_protector = DrawdownProtector()
+dd_protector = DrawdownProtector(
+    max_daily_loss_pct=getattr(cfg, 'MAX_DAILY_LOSS_PCT', 3.0),
+    max_weekly_loss_pct=getattr(cfg, 'MAX_WEEKLY_LOSS_PCT', 8.0),
+)
 position_mgr = PositionManager()
 
 # Instâncias globais (serão inicializadas no main)
@@ -164,6 +168,17 @@ pin_bar = None
 import src.logger as log
 import src.dashboard_server as dash
 import src.arb_runner as arb_runner
+from src.monitoring.alert_manager import AlertManager
+
+# Live state writer for Flask dashboard
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+    from live_state_writer import LiveStateWriter
+    _writer = LiveStateWriter()
+    _WRITER_OK = True
+except Exception as _we:
+    _WRITER_OK = False
+    print(f"[WARN] LiveStateWriter not available: {_we}")
 
 # Módulos opcionais — não bloqueiam se falharem
 try:
@@ -218,6 +233,7 @@ else:
     print("    ⚠ ⚠ MODO LIVE (DEMO): ordens reais na conta demo")
 
 PAPER_MODE = PAPER_TRADING
+alert_manager: AlertManager = None  # initialised in main()
 perf_analyzer = None
 trade_logger = None
 _trade_id_map: dict = {}  # ticket → trade_logger id
@@ -361,10 +377,15 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
     #     return status
         
     # News filter
-    news_check = news_filter.is_blocked(symbol, datetime.now())
-    if news_check['blocked']:
-        log.info(f"Bloqueado - {news_check['event_name']} em {news_check['minutes_until']}min", symbol)
-        return status
+    if cfg.USE_NEWS_FILTER:
+        news_check = news_filter.is_blocked(symbol, datetime.now())
+        if news_check['blocked']:
+            log.info(
+                f"[NEWS] Bloqueado {news_check['event_name']} | "
+                f"{news_check['minutes_until']}min | janela 30min antes / 15min após",
+                symbol,
+            )
+            return status
 
     if not is_new_bar(symbol, df):
         pos = get_position_obj(symbol)
@@ -492,17 +513,39 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
 
         # 2. Pirâmide Automática (Adicionar a posições vencedoras)
         if getattr(cfg, 'PYRAMIDING_ENABLED', True):
-            # Se lucro > 2% e menos que MAX_ADDS
             current_adds = position_mgr.get_position_adds(symbol)
-            if pos.profit > (account_balance * 0.02) and current_adds < getattr(cfg, 'PYRAMIDING_MAX_ADDS', 3):
-                add_lot = round(pos.volume * getattr(cfg, 'PYRAMIDING_SIZE_MULTIPLIER', 0.5), 2)
-                log.info(f"🚀 Pyramiding: Adicionando {add_lot} lots à posição vencedora", symbol)
+            max_adds = getattr(cfg, 'PYRAMIDING_MAX_ADDS', 2)
+
+            # Calculate pips profit (works for forex/metals/crypto)
+            _sym_info = mt5c.get_symbol_info(symbol)
+            _point = getattr(_sym_info, 'point', 0.00001) if _sym_info else 0.00001
+            _pip = _point * 10 if _point < 0.01 else _point  # 5/3-digit brokers
+            _price_diff = abs(current_price - pos.price_open)
+            profit_pips = _price_diff / _pip if _pip > 0 else 0
+
+            # Z-score condition: signal still valid (not yet reverting)
+            z_still_valid = (not np.isnan(z_last) and
+                             abs(z_last) >= z_enter * 0.8)
+
+            if (profit_pips >= 20
+                    and z_still_valid
+                    and current_adds < max_adds
+                    and pos.profit > 0):
+                add_lot = round(
+                    pos.volume * getattr(cfg, 'PYRAMIDING_SIZE_MULTIPLIER', 0.5), 2
+                )
+                add_lot = max(add_lot, _sym_info.volume_min if _sym_info else 0.01)
+                log.info(
+                    f"Pyramiding add #{current_adds+1}: {add_lot} lots "
+                    f"({profit_pips:.0f} pips profit, Z={z_last:.2f})", symbol
+                )
                 if not PAPER_MODE:
-                    # Abrir nova ordem na mesma direção
-                    res = mt5c.send_order(symbol, pos_type, add_lot, pos.price_open, 0.0, cfg.MAGIC_NUMBER, f"PYR_{current_adds}")
+                    res = mt5c.send_order(
+                        symbol, pos_type, add_lot, pos.price_open, 0.0,
+                        cfg.MAGIC_NUMBER, f"PYR_{current_adds+1}"
+                    )
                     if res['success']:
                         position_mgr.register_add(symbol)
-                        # Mover SL de ambas para o Breakeven da primeira (opcional/seguro)
                         mt5c.modify_position_sl_tp(pos.ticket, pos.price_open, pos.tp)
                 else:
                     position_mgr.register_add(symbol)
@@ -785,8 +828,8 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
 
             # Registrar no PositionManager
             position_mgr.open_position(symbol, lots, result['price'], signal)
-
-            # Alerta removido
+            # Notify alert manager (resets 48h idle timer)
+            alert_manager.record_trade()
             
     return status
 
@@ -889,12 +932,28 @@ def calculate_dynamic_lot_size(
     
     # Aplicar limites
     final_lot = max(min_lot, min(base_lot, max_lot))
-    
+
+    # ── Per-pair lot multiplier (reduce for new/unproven pairs) ──
+    pair_mult = getattr(cfg, 'LOT_MULTIPLIER_BY_PAIR', {}).get(symbol, 1.0)
+    if pair_mult != 1.0:
+        final_lot = round(final_lot * pair_mult, 2)
+        final_lot = max(min_lot, final_lot)
+        log.info(f"[PAIR MULT] {symbol}: {pair_mult}x → {final_lot:.2f} lots", symbol)
+
+    # ── Retail milestone cap: não exceder o lot máximo do tier ──
+    retail_max = get_retail_lot_size(account_balance)
+    if final_lot > retail_max:
+        log.info(
+            f"[SCALE] Lot {final_lot:.2f} → {retail_max:.2f} (retail cap "
+            f"milestone={get_retail_milestone(account_balance)['name']})", symbol
+        )
+        final_lot = retail_max
+
     log.info(
         f"🎯 {symbol} LOT: €{risk_amount:.2f} risk → {final_lot:.2f} lots "
         f"(ATR: {current_atr:.5f})", symbol
     )
-    
+
     return final_lot
 
 # ─── Loop principal ───────────────────────────────────────────
@@ -925,6 +984,10 @@ def main(mode: str = None):
         log.info("📊 Daily Reports: ATIVO")
     else:
         reporter = None
+
+    # Alert Manager (24/7 safety checks)
+    global alert_manager
+    alert_manager = AlertManager()
 
     # Auto-restart
     if cfg.AUTO_RESTART_ENABLED:
@@ -1010,7 +1073,7 @@ def main(mode: str = None):
     # ============================================================
     #  INICIALIZAR PORTFOLIO ALLOCATOR
     # ============================================================
-    symbols_to_trade = cfg.ALL_AVAILABLE_SYMBOLS
+    symbols_to_trade = getattr(cfg, 'ACTIVE_SYMBOLS', cfg.ALL_AVAILABLE_SYMBOLS)
     allocator = None
 
     if getattr(cfg, "USE_DYNAMIC_ALLOCATION", False):
@@ -1027,7 +1090,7 @@ def main(mode: str = None):
         log.info("📊 ALOCAÇÃO INICIAL:")
         print(allocator.get_allocation_report().to_string(index=False))
         
-        symbols_to_trade = cfg.ALL_AVAILABLE_SYMBOLS
+        symbols_to_trade = getattr(cfg, 'ACTIVE_SYMBOLS', cfg.ALL_AVAILABLE_SYMBOLS)
     
     # ============================================================
     #  STRATEGY MANAGER
@@ -1180,7 +1243,65 @@ def main(mode: str = None):
             sentiment = sentiment_analyzer.get_market_sentiment() if getattr(cfg, 'USE_SENTIMENT_ANALYSIS', False) else None
             dd_check = dd_protector.check_drawdown(balance)
 
+            # ── Alert Manager: 24/7 safety checks ──────────────
+            _margin_level = account.get('margin_level', 0.0) if account else 0.0
+            _spreads_now  = {s: mt5c.get_spread_points(s) for s in cfg.ACTIVE_SYMBOLS
+                             if getattr(cfg, 'ACTIVE_SYMBOLS', None)}
+            alert_check = alert_manager.check_all(
+                balance=balance,
+                positions=open_pos or [],
+                spreads=_spreads_now,
+                margin_level=float(_margin_level),
+            )
+            alert_manager.set_mt5_connected(bool(account))
+
+            # Close oldest position if margin is low
+            if 'CLOSE_OLDEST' in alert_check['actions'] and open_pos:
+                oldest = min(open_pos, key=lambda p: getattr(p, 'time', 0))
+                log.warning(f"[ALERT] Closing oldest position: {oldest.symbol} #{oldest.ticket}")
+                if not PAPER_MODE:
+                    mt5c.close_position(oldest, cfg.MAGIC_NUMBER)
+
+            # Reconnect MT5 if needed
+            if 'RECONNECT_MT5' in alert_check['actions']:
+                log.warning("[ALERT] Attempting MT5 reconnect...")
+                if mt5c.connect():
+                    log.success("MT5 reconnected", "ALERT")
+                    alert_manager.set_mt5_connected(True)
+
+            # STOP_TRADING from alert_manager (daily loss >2%)
+            if 'STOP_TRADING' in alert_check['actions']:
+                log.warning("[ALERT] STOP_TRADING — daily loss threshold hit")
+                time.sleep(cfg.LOOP_INTERVAL_SECONDS)
+                loop_count += 1
+                continue
+
+            # ── Limite de perda diária — parar TODAS as novas posições ──
+            if dd_check['action'] == 'STOP':
+                log.warning(
+                    f"[DD] LIMITE DIÁRIO ATINGIDO | "
+                    f"Daily DD: {dd_check['daily_dd_pct']:.2f}% / {cfg.MAX_DAILY_LOSS_PCT}% | "
+                    f"Sem novas posições até amanhã"
+                )
+                time.sleep(cfg.LOOP_INTERVAL_SECONDS)
+                loop_count += 1
+                continue
+
+            # ── Máximo de posições abertas ──
+            max_open = getattr(cfg, 'MAX_OPEN_POSITIONS', 3)
+            n_open = len(open_pos) if open_pos else 0
+            if n_open >= max_open:
+                log.info(f"[RISK] Max posições abertas ({n_open}/{max_open}) — sem novas entradas")
+                time.sleep(cfg.LOOP_INTERVAL_SECONDS)
+                loop_count += 1
+                continue
+
+            _skip_symbols = alert_check.get('skip_symbols', set())
+
             for symbol in symbols_to_trade:
+                if symbol in _skip_symbols:
+                    log.info(f"[ALERT] {symbol} skipped — spread spike", symbol)
+                    continue
                 try:
                     # Processar símbolo com toda a lógica de filtros e sinais
                     status = process_symbol(
@@ -1203,6 +1324,27 @@ def main(mode: str = None):
             # Verificar relatório diário (a cada loop):
             if reporter:
                 reporter.send_report()
+
+            # schedule.run_pending() para tarefas agendadas (email 18:00, etc.)
+            try:
+                import schedule
+                schedule.run_pending()
+            except ImportError:
+                pass
+
+            # ── Write live state for Flask dashboard ──
+            if _WRITER_OK:
+                try:
+                    _writer.update(
+                        account=mt5c.get_account_info(),
+                        positions=mt5c.get_open_positions(None, cfg.MAGIC_NUMBER) or [],
+                        signals=getattr(strategy_manager, 'last_signals', []),
+                        spreads={s: mt5c.get_spread_points(s) for s in cfg.SYMBOLS},
+                        prices={s: mt5c.get_tick(s).ask
+                                for s in cfg.SYMBOLS if mt5c.get_tick(s)},
+                    )
+                except Exception as _wex:
+                    log.warning(f"LiveStateWriter error: {_wex}")
 
             log.info(f"[dim]Próxima verificação em {cfg.LOOP_INTERVAL_SECONDS}s[/]")
             loop_count += 1
