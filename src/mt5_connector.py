@@ -10,7 +10,7 @@ from typing import Optional
 import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from config.settings import MT5_PATH, MT5_LOGIN, MT5_PASSWORD, MT5_SERVER
+import config.settings as settings
 
 TIMEFRAME_MAP = {
     "M1": mt5.TIMEFRAME_M1, "M5": mt5.TIMEFRAME_M5,
@@ -19,16 +19,49 @@ TIMEFRAME_MAP = {
 }
 
 
-def connect() -> bool:
-    kwargs = {"path": MT5_PATH} if MT5_PATH else {}
-    if not mt5.initialize(**kwargs):
-        return False
-    if MT5_LOGIN:
-        ok = mt5.login(MT5_LOGIN, password=MT5_PASSWORD, server=MT5_SERVER)
-        if not ok:
-            mt5.shutdown()
+connected = False
+
+
+def initialize():
+    """Inicializa conexão MT5."""
+    global connected
+
+    # Tentar inicializar
+    if not mt5.initialize():
+        # Tentar com path explícito
+        mt5_path = getattr(settings, 'MT5_PATH', r'C:\Program Files\MetaTrader 5\terminal64.exe')
+        if not mt5.initialize(path=mt5_path):
+            print(f"    ✘ MT5 initialize falhou: {mt5.last_error()}")
             return False
+
+    # Login
+    login = settings.MT5_LOGIN
+    password = settings.MT5_PASSWORD
+    server = settings.MT5_SERVER
+
+    authorized = mt5.login(login, password, server)
+
+    if not authorized:
+        error = mt5.last_error()
+        print(f"    ✘ MT5 login falhou: {error}")
+        mt5.shutdown()
+        return False
+
+    # Verificar conta
+    account_info = mt5.account_info()
+    if account_info is None:
+        print(f"    ✘ Não conseguiu obter info da conta")
+        mt5.shutdown()
+        return False
+
+    connected = True
+    print(f"    ✅ MT5 conectado: Conta {account_info.login} | Balance €{account_info.balance:.2f}")
     return True
+
+
+def connect() -> bool:
+    """Alias para compatibilidade."""
+    return initialize()
 
 
 def disconnect():
@@ -215,7 +248,7 @@ def close_position(position, magic, deviation=20):
         return {"success": False, "error": "no tick"}
 
     close_type = mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
-    price      = tick.bid if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_ASK
+    price      = tick.bid if position.type == mt5.ORDER_TYPE_BUY else tick.ask
 
     request = {
         "action":       mt5.TRADE_ACTION_DEAL,
@@ -246,7 +279,7 @@ def close_position_partial(position, volume_to_close, magic, deviation=20):
         return {"success": False, "error": "no tick"}
 
     close_type = mt5.ORDER_TYPE_SELL if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
-    price      = tick.bid if position.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_ASK
+    price      = tick.bid if position.type == mt5.ORDER_TYPE_BUY else tick.ask
 
     # Garantir que o volume é válido para o símbolo
     info = mt5.symbol_info(position.symbol)
@@ -280,3 +313,65 @@ def close_position_partial(position, volume_to_close, magic, deviation=20):
     if result.retcode == mt5.TRADE_RETCODE_DONE:
         return {"success": True, "ticket": result.order, "volume_closed": volume_to_close}
     return {"success": False, "retcode": result.retcode, "error": result.comment}
+
+
+def modify_position_sl_tp(position_ticket: int, symbol: str, new_sl: float = None, new_tp: float = None):
+    """
+    Modifica SL/TP de uma posição existente
+    
+    Args:
+        position_ticket: Ticket da posição
+        symbol: Símbolo
+        new_sl: Novo stop loss (None = manter atual)
+        new_tp: Novo take profit (None = manter atual)
+    
+    Returns:
+        dict com success=True/False
+    """
+    # Buscar posição atual
+    positions = mt5.positions_get(ticket=position_ticket)
+    if not positions or len(positions) == 0:
+        return {"success": False, "error": "Position not found"}
+    
+    position = positions[0]
+    
+    # Usar valores atuais se não especificado
+    if new_sl is None:
+        new_sl = position.sl
+    if new_tp is None:
+        new_tp = position.tp
+    
+    # Validar SL
+    direction = "BUY" if position.type == 0 else "SELL"
+    new_sl = validate_sl(symbol, direction, position.price_open, new_sl)
+    
+    if new_sl == 0.0:
+        return {"success": False, "error": "Invalid SL after validation"}
+    
+    # Preparar request
+    request = {
+        "action": mt5.TRADE_ACTION_SLTP,
+        "symbol": symbol,
+        "position": position_ticket,
+        "sl": new_sl,
+        "tp": new_tp,
+    }
+    
+    result = mt5.order_send(request)
+    
+    if result is None:
+        return {"success": False, "error": "order_send returned None"}
+    
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        return {
+            "success": True,
+            "ticket": position_ticket,
+            "new_sl": new_sl,
+            "new_tp": new_tp
+        }
+    
+    return {
+        "success": False,
+        "retcode": result.retcode,
+        "error": result.comment
+    }

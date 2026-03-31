@@ -15,6 +15,7 @@ Allocation proporcional ao Sharpe de cada estratégia.
 
 import numpy as np
 import pandas as pd
+import time
 from typing import Dict, List, Optional
 from datetime import datetime
 import sys, os
@@ -47,39 +48,75 @@ class StrategyManager:
         try:
             from src.strategies.pairs_trading import PairsTrading
             self.strategies['pairs'] = PairsTrading()
-            self.strategy_weights['pairs'] = 0.2  # 20% do capital
-        except:
-            pass
+            self.strategy_weights['pairs'] = 0.1
+        except: pass
         
         try:
             from src.strategies.trend_following import TrendFollowing
             self.strategies['trend'] = TrendFollowing()
-            self.strategy_weights['trend'] = 0.25  # 25%
-        except:
-            pass
+            self.strategy_weights['trend'] = 0.15
+        except: pass
         
         try:
             from src.strategies.breakout import Breakout
             self.strategies['breakout'] = Breakout()
-            self.strategy_weights['breakout'] = 0.2  # 20%
-        except:
-            pass
+            self.strategy_weights['breakout'] = 0.1
+        except: pass
         
         try:
             from src.strategies.volatility_arbitrage import VolatilityArbitrage
             self.strategies['volatility'] = VolatilityArbitrage()
-            self.strategy_weights['volatility'] = 0.15  # 15%
-        except:
-            pass
+            self.strategy_weights['volatility'] = 0.1
+        except: pass
         
         try:
             from src.strategies.news_trading import NewsTrading
             self.strategies['news'] = NewsTrading()
-            self.strategy_weights['news'] = 0.1  # 10%
-        except:
-            pass
+            self.strategy_weights['news'] = 0.1
+        except: pass
+
+        # NOVAS ESTRATÉGIAS
+        try:
+            from src.strategies.supply_demand import SupplyDemandStrategy
+            self.strategies['supply_demand'] = SupplyDemandStrategy(
+                zone_strength_min=cfg.SUPPLY_DEMAND_ZONE_STRENGTH,
+                zone_age_max=cfg.SUPPLY_DEMAND_ZONE_AGE,
+                price_move_min=cfg.SUPPLY_DEMAND_MIN_MOVE
+            )
+            self.strategy_weights['supply_demand'] = 0.15
+        except Exception as e:
+            print(f"Erro ao carregar SupplyDemandStrategy: {e}")
+
+        try:
+            from src.strategies.pin_bar import PinBarStrategy
+            self.strategies['pin_bar'] = PinBarStrategy(
+                shadow_to_body_ratio=cfg.PIN_BAR_SHADOW_RATIO,
+                shadow_to_total_ratio=cfg.PIN_BAR_SHADOW_PCT,
+                z_score_threshold=cfg.PIN_BAR_Z_THRESHOLD
+            )
+            self.strategy_weights['pin_bar'] = 0.15
+        except Exception as e:
+            print(f"Erro ao carregar PinBarStrategy: {e}")
+
+        try:
+            from src.strategies.price_action import PriceActionStrategy
+            self.strategies['price_action'] = PriceActionStrategy()
+            self.strategy_weights['price_action'] = 0.1
+        except: pass
+
+        try:
+            from src.strategies.market_making import MarketMakingStrategy
+            self.strategies['market_making'] = MarketMakingStrategy()
+            self.strategy_weights['market_making'] = 0.1
+        except: pass
+
+        try:
+            from src.strategies.news_momentum import NewsMomentumStrategy
+            self.strategies['news_momentum'] = NewsMomentumStrategy()
+            self.strategy_weights['news_momentum'] = 0.1
+        except: pass
         
-        # Mean reversion (estratégia existente) = 10%
+        # Mean reversion (estratégia existente via main.py)
         self.strategy_weights['mean_reversion'] = 0.1
         
         print(f"✅ Strategy Manager: {len(self.strategies)} estratégias carregadas")
@@ -88,14 +125,6 @@ class StrategyManager:
                            current_datetime: datetime = None) -> Dict:
         """
         Combina sinais de todas as estratégias.
-        
-        Returns:
-            {
-                'strategy': str,  # Estratégia escolhida
-                'signal': 'BUY' | 'SELL' | 'EXIT' | None,
-                'confidence': float,
-                'all_signals': {strategy_name: signal_dict}
-            }
         """
         if current_datetime is None:
             current_datetime = datetime.now()
@@ -105,10 +134,7 @@ class StrategyManager:
         # Coletar sinais de cada estratégia
         for name, strategy in self.strategies.items():
             try:
-                if name == 'pairs':
-                    # Pairs precisa de dois símbolos
-                    # Skip por enquanto (precisa lógica especial)
-                    continue
+                if name == 'pairs': continue
                 
                 elif name == 'trend':
                     df_with_indicators = strategy.calculate_indicators(df)
@@ -124,6 +150,46 @@ class StrategyManager:
                 
                 elif name == 'news':
                     signal = strategy.get_signal(symbol, current_datetime, df)
+
+                elif name == 'supply_demand':
+                    tick = df.iloc[-1]
+                    signal_type = strategy.check_zone_retest(tick['close'], len(df), df)
+                    signal = {'signal': signal_type, 'confidence': 0.8}
+
+                elif name == 'pin_bar':
+                    # Precisamos do z-score, mas como o StrategyManager é genérico, 
+                    # vamos calcular um z-score simples se não for passado
+                    ma = df['close'].rolling(20).mean()
+                    std = df['close'].rolling(20).std()
+                    z_score = (df['close'].iloc[-1] - ma.iloc[-1]) / std.iloc[-1] if std.iloc[-1] > 0 else 0
+                    signal_type = strategy.check_signal(df, z_score)
+                    signal = {'signal': signal_type, 'confidence': 0.75}
+
+                # NOVAS ESTRATÉGIAS
+                elif name == 'price_action':
+                    pa_signals = strategy.generate_signals(df)
+                    if pa_signals:
+                        # Pegar o primeiro sinal para simplificar
+                        setup_name, side = pa_signals[0]
+                        signal = {'signal': side, 'confidence': 0.7, 'setup': setup_name}
+                    else:
+                        signal = {'signal': None}
+
+                elif name == 'market_making':
+                    # Lógica simplificada: sinalizar se spread for atrativo
+                    spread = (df['close'].iloc[-1] * 0.0001) # Dummy spread points
+                    if spread > strategy.spread_target:
+                        signal = {'signal': 'NEUTRAL', 'confidence': 0.5}
+                    else:
+                        signal = {'signal': None}
+
+                elif name == 'news_momentum':
+                    # Simplificação: evento imaginário para teste
+                    signal = strategy.detect_momentum(df, time.time() - 30)
+                    if signal:
+                        signal = {'signal': signal, 'confidence': 0.8}
+                    else:
+                        signal = {'signal': None}
                 
                 all_signals[name] = signal
             

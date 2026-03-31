@@ -37,7 +37,6 @@ SL_ATR_MULT = 2.0
 MAX_RISK_PER_TRADE = 0.02
 MAX_POSITIONS = 5
 POSITION_SIZE = 0.01
-MAX_DAILY_LOSS_PCT = 5.0  # Limite de perda diária (5%)
 
 # Magic Number
 MAGIC_NUMBER = 123456
@@ -379,53 +378,3 @@ REPORT_TIME_HOUR = 23  # 23:00
 # Config backup
 AUTO_BACKUP_ENABLED = True
 BACKUP_INTERVAL_HOURS = 24
-
-
-# ============================================================
-#  SPREAD FILTER
-# ============================================================
-
-# Spread máximo por tipo de símbolo (em pontos)
-MAX_SPREAD_FOREX = 20       # Pares forex
-MAX_SPREAD_CRYPTO = 100     # Crypto
-MAX_SPREAD_INDICES = 50     # Índices
-MAX_SPREAD_COMMODITIES = 30 # Commodities
-MAX_SPREAD_DEFAULT = 30     # Default
-
-def get_max_spread_for_symbol(symbol: str) -> float:
-    """
-    Retorna spread máximo aceitável para o símbolo
-    
-    Args:
-        symbol: Nome do símbolo (ex: EURUSD, BTCUSD)
-        
-    Returns:
-        float: Spread máximo em pontos
-    """
-    symbol = symbol.upper()
-    
-    # Crypto
-    if any(x in symbol for x in ['BTC', 'ETH', 'XRP', 'SOL', 'ADA']):
-        return MAX_SPREAD_CRYPTO
-    
-    # Commodities
-    if any(x in symbol for x in ['GOLD', 'SILVER', 'OIL', 'GAS']):
-        return MAX_SPREAD_COMMODITIES
-    
-    # Índices
-    if any(x in symbol for x in ['SPX', 'NAS', 'DAX', 'FTSE', 'NDX']):
-        return MAX_SPREAD_INDICES
-    
-    # Forex (default)
-    if any(x in symbol for x in ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD']):
-        return MAX_SPREAD_FOREX
-    
-    return MAX_SPREAD_DEFAULT
-
-# ============================================================
-#  ATR PARAMETERS (para volatility scaling)
-# ============================================================
-
-ATR_MIN_MULT = 0.5   # Multiplicador mínimo de ATR
-ATR_MAX_MULT = 2.0   # Multiplicador máximo de ATR
-ATR_REFERENCE = 14   # Período de referência ATR

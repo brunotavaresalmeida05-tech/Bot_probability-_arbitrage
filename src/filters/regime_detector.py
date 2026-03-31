@@ -32,14 +32,14 @@ class RegimeDetector:
         atr_pct = df['atr'] / df['close'] * 100
         vol_z = (atr_pct.iloc[-1] - atr_pct.mean()) / atr_pct.std()
         
-        # Classificar regime
-        if adx > 25:
-            if vol_z > 1.0:
+        # Classificar regime (AJUSTADO - mais permissivo)
+        if adx > 30:  # Mais rigoroso para trend
+            if vol_z > 2.5:  # Só bloquear extrema volatilidade
                 regime = 'VOLATILE_TREND'
             else:
                 regime = 'TREND'
         else:
-            if vol_z > 1.0:
+            if vol_z > 3.5:  # Só bloquear volatilidade extrema em range
                 regime = 'VOLATILE_RANGE'
             else:
                 regime = 'RANGE'

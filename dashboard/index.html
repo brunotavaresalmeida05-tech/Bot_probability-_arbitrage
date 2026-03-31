@@ -1,947 +1,342 @@
 <!DOCTYPE html>
 <html lang="pt">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QuantPro — Dashboard Geral</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://unpkg.com/lucide@latest"></script>
-<style>
-  :root {
-    --bg:       #0d1117;
-    --surface:  #161b22;
-    --border:   #30363d;
-    --text:     #e6edf3;
-    --muted:    #8b949e;
-    --green:    #3fb950;
-    --red:      #f85149;
-    --blue:     #58a6ff;
-    --yellow:   #d29922;
-    --purple:   #bc8cff;
-    --radius:   6px;
-    --sidebar-width: 180px;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-    display: flex;
-    height: 100vh;
-    overflow: hidden;
-  }
-
-  /* ── SIDEBAR ─────────────────────────────── */
-  .sidebar {
-    width: var(--sidebar-width);
-    background: var(--surface);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
-  }
-
-  .sidebar-header {
-    padding: 20px;
-    border-bottom: 1px solid var(--border);
-    font-size: 14px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: var(--blue);
-  }
-
-  .nav {
-    list-style: none;
-    padding: 12px 8px;
-    flex-grow: 1;
-  }
-
-  .nav-item { margin-bottom: 4px; }
-
-  .nav-item a {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    color: var(--muted);
-    text-decoration: none;
-    border-radius: var(--radius);
-    font-size: 13px;
-    transition: all 0.2s;
-  }
-
-  .nav-item a i { width: 16px; height: 16px; }
-  .nav-item a:hover { background: #1e2530; color: var(--text); }
-  .nav-item.active a { background: #1f2937; color: var(--blue); font-weight: 500; }
-
-  /* ── MAIN CONTENT ─────────────────────────── */
-  .content-wrapper {
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  header {
-    height: 56px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 24px;
-    flex-shrink: 0;
-  }
-
-  header h1 {
-    font-size: 14px;
-    font-weight: 500;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 8px var(--green);
-    animation: pulse-dot 1.5s ease-in-out infinite;
-  }
-  @keyframes pulse-dot {
-    0%, 100% { box-shadow: 0 0 4px var(--green); }
-    50% { box-shadow: 0 0 12px var(--green), 0 0 20px rgba(63,185,80,0.3); }
-  }
-  .dot.offline { background: var(--red); box-shadow: none; animation: none; }
-
-  .header-meta {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    font-size: 12px;
-    color: var(--muted);
-  }
-
-  .market-sessions {
-    display: flex;
-    gap: 8px;
-    margin-right: 20px;
-    padding-right: 20px;
-    border-right: 1px solid var(--border);
-  }
-
-  .session-pill {
-    font-size: 9px;
-    padding: 4px 8px;
-    border-radius: 10px;
-    background: #1e2530;
-    color: var(--muted);
-    border: 1px solid var(--border);
-    font-weight: 600;
-    text-transform: uppercase;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    min-width: 52px;
-  }
-
-  .session-pill .s-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .session-pill .s-hours {
-    font-size: 10px;
-    font-weight: 500;
-    color: #ffffff;
-    text-transform: none;
-  }
-
-  .session-pill.active {
-    background: rgba(63, 185, 80, 0.1);
-    color: var(--green);
-    border-color: rgba(63, 185, 80, 0.4);
-  }
-
-  .session-pill .s-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--muted); }
-  .session-pill.active .s-dot { background: var(--green); box-shadow: 0 0 4px var(--green); }
-
-  .header-meta b { color: var(--text); font-weight: 500; }
-
-  main {
-    padding: 20px;
-    overflow-y: auto;
-    flex-grow: 1;
-  }
-
-  .page-section { display: none; }
-  .page-section.active { display: block; animation: fadeIn 0.2s ease-out; }
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* ── CARDS ──────────────────────────────── */
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px;
-    margin-bottom: 20px;
-  }
-
-  .card-title {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--muted);
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .card-title div { display: flex; align-items: center; gap: 8px; }
-  .card-title i { width: 14px; height: 14px; }
-
-  /* Stats Grid */
-  .stats-row {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 12px;
-    margin-bottom: 20px;
-  }
-
-  .stat {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 14px;
-  }
-  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
-  .stat-value { font-size: 18px; font-weight: 600; }
-  .stat-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
-
-  .dashboard-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
-    margin-bottom: 20px;
-  }
-
-  .positive { color: var(--green); }
-  .negative { color: var(--red); }
-  .neutral  { color: var(--blue); }
-
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th { text-align: left; padding: 10px; font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--border); }
-  td { padding: 12px 10px; border-bottom: 1px solid #1e2530; }
-
-  .badge { padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; }
-  .badge-buy   { background: #1a3a1a; color: var(--green); }
-  .badge-sell  { background: #3a1a1a; color: var(--red); }
-  .badge-none  { background: #1e2530; color: var(--muted); }
-
-  .chart-wrap { position: relative; height: 260px; width: 100%; }
-
-  .trade-row {
-    display: grid;
-    grid-template-columns: 140px 80px 80px 100px 100px 90px 1fr;
-    padding: 10px 4px;
-    border-bottom: 1px solid #1e2530;
-    font-size: 12px;
-  }
-  .trade-row.header { color: var(--muted); font-size: 11px; text-transform: uppercase; }
-
-  .empty-state { color: var(--muted); text-align: center; padding: 40px; font-size: 13px; }
-
-  .z-bar-wrap { display: flex; align-items: center; gap: 8px; }
-  .z-bar-bg { width: 80px; height: 6px; background: #1e2530; border-radius: 3px; overflow: hidden; position: relative; }
-  .z-bar-fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; transition: all .3s; }
-
-  /* ── LIVE ANIMATIONS ──────────────────────── */
-  @keyframes flash-green {
-    0% { background: rgba(63,185,80,0.25); }
-    100% { background: transparent; }
-  }
-  @keyframes flash-red {
-    0% { background: rgba(248,81,73,0.25); }
-    100% { background: transparent; }
-  }
-  .flash-up { animation: flash-green 0.4s ease-out; }
-  .flash-down { animation: flash-red 0.4s ease-out; }
-
-  .stat-value {
-    transition: color 0.15s ease;
-  }
-
-  .live-value {
-    transition: color 0.15s ease;
-    display: inline-block;
-  }
-
-  .z-bar-fill { transition: all 0.2s ease-out !important; }
-
-  .ticker-bar {
-    height: 3px;
-    background: var(--border);
-    overflow: hidden;
-    position: relative;
-  }
-  .ticker-bar-fill {
-    height: 100%;
-    background: var(--green);
-    width: 0%;
-    transition: width 0.2s linear;
-  }
-
-  .update-counter {
-    font-family: 'Courier New', monospace;
-    font-size: 10px;
-    color: var(--muted);
-    letter-spacing: 0.5px;
-  }
-
-  .latency-badge {
-    font-size: 9px;
-    padding: 2px 6px;
-    border-radius: 3px;
-    background: rgba(63,185,80,0.1);
-    color: var(--green);
-    font-weight: 600;
-    font-family: monospace;
-  }
-  .latency-badge.slow {
-    background: rgba(210,153,34,0.1);
-    color: var(--yellow);
-  }
-
-  footer {
-    height: 32px;
-    background: var(--surface);
-    border-top: 1px solid var(--border);
-    padding: 0 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 11px;
-    color: var(--muted);
-    gap: 16px;
-  }
-
-  .footer-left, .footer-right {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Bot V6 - Dashboard Pro</title>
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
-
-<aside class="sidebar">
-  <div class="sidebar-header">
-    <i data-lucide="command"></i>
-    <span>QuantPro</span>
-  </div>
-  <ul class="nav">
-    <li class="nav-item active" data-tab="geral">
-      <a href="javascript:void(0)"><i data-lucide="home"></i> Geral</a>
-    </li>
-    <li class="nav-item" data-tab="symbols">
-      <a href="javascript:void(0)"><i data-lucide="layers"></i> Símbolos</a>
-    </li>
-    <li class="nav-item" data-tab="positions">
-      <a href="javascript:void(0)"><i data-lucide="lock"></i> Posições</a>
-    </li>
-    <li class="nav-item" data-tab="history">
-      <a href="javascript:void(0)"><i data-lucide="history"></i> Histórico</a>
-    </li>
-    <li class="nav-item" data-tab="macro">
-      <a href="javascript:void(0)"><i data-lucide="globe"></i> Macro</a>
-    </li>
-    <li class="nav-item" data-tab="quality">
-      <a href="javascript:void(0)"><i data-lucide="check-circle"></i> Qualidade</a>
-    </li>
-    <li class="nav-item" data-tab="config">
-      <a href="javascript:void(0)"><i data-lucide="settings"></i> Config</a>
-    </li>
-  </ul>
-</aside>
-
-<div class="content-wrapper">
-  <header>
-    <h1>
-      <span class="dot" id="dot"></span>
-      MT5 Mean Reversion Engine
-    </h1>
-    <div class="header-meta">
-      <div class="market-sessions">
-        <div class="session-pill" id="sess-syd"><span class="s-row"><span class="s-dot"></span>SYD</span><span class="s-hours" id="clock-syd">--:--</span></div>
-        <div class="session-pill" id="sess-tky"><span class="s-row"><span class="s-dot"></span>TKY</span><span class="s-hours" id="clock-tky">--:--</span></div>
-        <div class="session-pill" id="sess-ldn"><span class="s-row"><span class="s-dot"></span>LDN</span><span class="s-hours" id="clock-ldn">--:--</span></div>
-        <div class="session-pill" id="sess-ny" ><span class="s-row"><span class="s-dot"></span>NY</span><span class="s-hours" id="clock-ny">--:--</span></div>
-      </div>
-      <span>Conta: <b id="h-login">–</b></span>
-      <span>Servidor: <b id="h-server">–</b></span>
-      <span>Uptime: <b id="h-uptime">–</b></span>
-    </div>
-  </header>
-
-  <main>
-    <!-- SECTION: GERAL (VISÃO COMPLETA) -->
-    <section id="geral" class="page-section active">
-      <!-- STATS -->
-      <div class="stats-row">
-        <div class="stat">
-          <div class="stat-label">Saldo</div>
-          <div class="stat-value neutral" id="s-balance">–</div>
-          <div class="stat-sub">account balance</div>
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo">
+                <i class="fas fa-chart-line"></i>
+                <span>TradingBot V6</span>
+            </div>
         </div>
-        <div class="stat">
-          <div class="stat-label">Equity</div>
-          <div class="stat-value" id="s-equity">–</div>
-          <div class="stat-sub" id="s-equity-diff-geral">–</div>
+        
+        <div class="sidebar-menu">
+            <a href="#" class="menu-item active" data-page="home">
+                <i class="fas fa-home"></i>
+                <span>Geral</span>
+            </a>
+            <a href="#" class="menu-item" data-page="execution">
+                <i class="fas fa-bolt"></i>
+                <span>Execução</span>
+            </a>
+            <a href="#" class="menu-item" data-page="portfolio">
+                <i class="fas fa-briefcase"></i>
+                <span>Portfolio</span>
+            </a>
+            <a href="#" class="menu-item" data-page="strategies">
+                <i class="fas fa-brain"></i>
+                <span>Estratégias</span>
+            </a>
+            <a href="#" class="menu-item" data-page="symbols">
+                <i class="fas fa-chart-bar"></i>
+                <span>Símbolos</span>
+            </a>
+            <a href="#" class="menu-item" data-page="history">
+                <i class="fas fa-history"></i>
+                <span>Histórico</span>
+            </a>
+            <a href="#" class="menu-item" data-page="correlations">
+                <i class="fas fa-project-diagram"></i>
+                <span>Correlações</span>
+            </a>
         </div>
-        <div class="stat">
-          <div class="stat-label">Margem</div>
-          <div class="stat-value" id="s-margin">–</div>
-          <div class="stat-sub">used margin</div>
+        
+        <div class="sidebar-footer">
+            <div class="connection-status">
+                <div class="status-indicator online"></div>
+                <span>MT5 Conectado</span>
+            </div>
         </div>
-        <div class="stat">
-          <div class="stat-label">Posições</div>
-          <div class="stat-value neutral" id="s-positions">–</div>
-          <div class="stat-sub">open count</div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <!-- Header -->
+        <header class="top-header">
+            <div class="header-left">
+                <h1 id="page-title">Dashboard Geral</h1>
+                <span class="subtitle">Conta: <strong id="account-number">6220103</strong></span>
+            </div>
+            <div class="header-right">
+                <div class="stat-box">
+                    <span class="stat-label">Balance</span>
+                    <span class="stat-value" id="balance">€0.00</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Equity</span>
+                    <span class="stat-value" id="equity">€0.00</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">P&L</span>
+                    <span class="stat-value" id="pnl">€0.00</span>
+                </div>
+                <div class="stat-box">
+                    <span class="stat-label">Posições</span>
+                    <span class="stat-value" id="open-positions">0</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Page Container -->
+        <div id="page-container">
+            <!-- HOME PAGE -->
+            <div id="page-home" class="page active">
+                <!-- Capital Scaling Panel -->
+                <div class="card capital-scaling">
+                    <div class="card-header">
+                        <i class="fas fa-trophy"></i>
+                        <h3>Capital Scaling Progress</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="milestone-info">
+                            <div class="current-milestone">
+                                <span class="label">Milestone Atual:</span>
+                                <span class="value" id="current-milestone">Micro</span>
+                            </div>
+                            <div class="next-milestone">
+                                <span class="label">Próximo:</span>
+                                <span class="value" id="next-milestone">€500</span>
+                            </div>
+                        </div>
+                        
+                        <div class="progress-bar-container">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="milestone-progress" style="width: 0%"></div>
+                            </div>
+                            <div class="progress-labels">
+                                <span id="current-balance">€0.00</span>
+                                <span id="progress-percentage">0%</span>
+                                <span id="target-balance">€500.00</span>
+                            </div>
+                        </div>
+                        
+                        <div class="milestone-stats">
+                            <div class="stat">
+                                <span class="label">Crescimento</span>
+                                <span class="value" id="growth-percentage">0%</span>
+                            </div>
+                            <div class="stat">
+                                <span class="label">Faltam</span>
+                                <span class="value" id="remaining-amount">€0.00</span>
+                            </div>
+                            <div class="stat">
+                                <span class="label">Dias estimados</span>
+                                <span class="value" id="days-to-milestone">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Row -->
+                <div class="charts-row">
+                    <!-- Equity Curve -->
+                    <div class="card chart-card">
+                        <div class="card-header">
+                            <i class="fas fa-chart-line"></i>
+                            <h3>Equity Curve</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="equity-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- 12-Month Projection -->
+                    <div class="card chart-card">
+                        <div class="card-header">
+                            <i class="fas fa-chart-area"></i>
+                            <h3>Projeção 12 Meses</h3>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="projection-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Strategy Performance -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-trophy"></i>
+                        <h3>Win Rate por Estratégia</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="strategy-performance" class="table-container">
+                            <p class="loading">Carregando métricas...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- EXECUTION PAGE -->
+            <div id="page-execution" class="page">
+                <div class="execution-grid">
+                    <!-- Live Signals -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fas fa-bolt"></i>
+                            <h3>Live Signals</h3>
+                            <span class="badge">Últimos 10min</span>
+                        </div>
+                        <div class="card-body">
+                            <div id="live-signals" class="signals-list">
+                                <p class="empty-state">Aguardando sinais...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Market Sentiment -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fas fa-compass"></i>
+                            <h3>Market Sentiment</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="market-sentiment">
+                                <div class="sentiment-gauge">
+                                    <canvas id="sentiment-gauge"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PORTFOLIO PAGE -->
+            <div id="page-portfolio" class="page">
+                <!-- Open Positions -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-briefcase"></i>
+                        <h3>Posições Abertas</h3>
+                        <span class="badge" id="positions-count">0</span>
+                    </div>
+                    <div class="card-body">
+                        <div id="open-positions-list" class="positions-grid">
+                            <p class="empty-state">Sem posições abertas</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pyramiding Status -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-layer-group"></i>
+                        <h3>Pyramiding Status</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="pyramiding-status">
+                            <p class="empty-state">Nenhum pyramiding ativo</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Trailing Stops -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-shield-alt"></i>
+                        <h3>Trailing Stops</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="trailing-stops">
+                            <p class="empty-state">Nenhum trailing stop ativo</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- STRATEGIES PAGE -->
+            <div id="page-strategies" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-brain"></i>
+                        <h3>Performance por Estratégia</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="strategies-table" class="table-container">
+                            <p class="loading">Carregando dados...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-chart-pie"></i>
+                        <h3>Alocação de Capital</h3>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="allocation-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SYMBOLS PAGE -->
+            <div id="page-symbols" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-chart-bar"></i>
+                        <h3>Símbolos em Tempo Real</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="symbols-table" class="table-container">
+                            <p class="loading">Carregando símbolos...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- HISTORY PAGE -->
+            <div id="page-history" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-history"></i>
+                        <h3>Histórico de Trades</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="filters-bar">
+                            <input type="text" id="search-symbol" placeholder="Filtrar símbolo...">
+                            <select id="filter-strategy">
+                                <option value="">Todas estratégias</option>
+                            </select>
+                            <select id="filter-result">
+                                <option value="">Todos resultados</option>
+                                <option value="win">Só wins</option>
+                                <option value="loss">Só losses</option>
+                            </select>
+                        </div>
+                        <div id="history-table" class="table-container">
+                            <p class="loading">Carregando histórico...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- CORRELATIONS PAGE -->
+            <div id="page-correlations" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-project-diagram"></i>
+                        <h3>Matriz de Correlação</h3>
+                    </div>
+                    <div class="card-body">
+                        <div id="correlation-matrix">
+                            <p class="loading">Calculando correlações...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
-        <div class="stat">
-          <div class="stat-label">Hoje</div>
-          <div class="stat-value" id="s-trades-today">–</div>
-          <div class="stat-sub">trades closed</div>
-        </div>
-      </div>
+    </main>
 
-      <!-- CHARTS GRID -->
-      <div class="dashboard-grid">
-        <div class="card">
-          <div class="card-title"><div><i data-lucide="trending-up"></i> Curva de Equity (tempo real)</div></div>
-          <div class="chart-wrap">
-            <canvas id="equity-chart"></canvas>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-title"><div><i data-lucide="activity"></i> Histórico Z-Score — <span id="z-chart-label" style="color:var(--blue)">–</span></div></div>
-          <div class="chart-wrap">
-            <canvas id="z-chart"></canvas>
-          </div>
-          <div style="margin-top:12px; display:flex; gap:6px; flex-wrap:wrap;" id="symbol-btns"></div>
-        </div>
-      </div>
-
-      <!-- SYMBOLS TABLE -->
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="layers"></i> Símbolos em tempo real</div></div>
-        <table>
-          <thead>
-            <tr>
-              <th>Símbolo</th>
-              <th>Z-Score</th>
-              <th>Preço</th>
-              <th>MA</th>
-              <th>Spread</th>
-              <th>Sinal</th>
-              <th>Posição</th>
-              <th>P&L Aberto</th>
-            </tr>
-          </thead>
-          <tbody id="symbols-tbody"></tbody>
-        </table>
-      </div>
-
-      <!-- OPEN POSITIONS -->
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="unlock"></i> Posições Abertas (MT5)</div></div>
-        <div class="trade-row header">
-          <div>Hora</div><div>Símbolo</div><div>Dir</div>
-          <div>Entrada</div><div>S/L</div><div>Lots</div><div>P&amp;L</div><div>Tipo</div>
-        </div>
-        <div id="open-positions-list"></div>
-      </div>
-
-      <!-- MACRO PANEL -->
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="globe"></i> Macro Intelligence Engine</div></div>
-        <div id="macro-content"></div>
-      </div>
-
-      <!-- TRADES HISTORY -->
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="history"></i> Últimos Trades Fechados</div></div>
-        <div class="trade-row header">
-          <div>Hora</div><div>Símbolo</div><div>Dir</div>
-          <div>Entrada</div><div>Saída</div><div>P&amp;L</div><div>Motivo</div>
-        </div>
-        <div id="trades-list"></div>
-      </div>
-    </section>
-
-    <!-- SECTION: SYMBOLS (ONLY) -->
-    <section id="symbols" class="page-section">
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="layers"></i> Monitoramento de Ativos</div></div>
-        <table>
-          <thead>
-            <tr>
-              <th>Símbolo</th>
-              <th>Z-Score</th>
-              <th>Preço</th>
-              <th>MA</th>
-              <th>Spread</th>
-              <th>Sinal</th>
-              <th>Posição</th>
-              <th>P&L</th>
-            </tr>
-          </thead>
-          <tbody id="symbols-tbody-only"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- SECTION: POSITIONS (ONLY) -->
-    <section id="positions" class="page-section">
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="lock"></i> Posições Abertas</div></div>
-        <div id="open-positions-list-only"></div>
-      </div>
-    </section>
-
-    <!-- SECTION: HISTORY (ONLY) -->
-    <section id="history" class="page-section">
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="history"></i> Histórico Completo</div></div>
-        <div id="trades-list-only"></div>
-      </div>
-    </section>
-
-    <!-- SECTION: MACRO (ONLY) -->
-    <section id="macro" class="page-section">
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="globe"></i> Inteligência Macro</div></div>
-        <div id="macro-content-only"></div>
-      </div>
-    </section>
-
-    <!-- SECTION: QUALITY -->
-    <section id="quality" class="page-section">
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="shield-check"></i> Saúde Geral do Sistema</div></div>
-        <div class="stats-row" style="grid-template-columns: repeat(3, 1fr);">
-          <div class="stat" style="text-align:center">
-            <div class="stat-label">System Health</div>
-            <div class="stat-value" id="q-system-grade" style="font-size:48px">–</div>
-            <div class="stat-sub" id="q-system-status">Aguardando...</div>
-          </div>
-          <div class="stat" style="text-align:center">
-            <div class="stat-label">APIs Online</div>
-            <div class="stat-value" id="q-apis-online" style="color:var(--blue)">–</div>
-            <div class="stat-sub" id="q-avg-uptime">0% Uptime</div>
-          </div>
-          <div class="stat" style="text-align:center">
-            <div class="stat-label">Avg Quality</div>
-            <div class="stat-value" id="q-avg-quality" style="color:var(--purple)">–</div>
-            <div class="stat-sub">score / 100</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="database"></i> Qualidade de Dados por Símbolo</div></div>
-        <table>
-          <thead>
-            <tr>
-              <th>Símbolo</th>
-              <th>Score</th>
-              <th>Grade</th>
-              <th>Consensus</th>
-              <th>News</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody id="quality-tbody"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- SECTION: CONFIG -->
-    <section id="config" class="page-section">
-      <div class="card">
-        <div class="card-title"><div><i data-lucide="settings"></i> Configurações</div></div>
-        <p style="font-size:13px; color:var(--muted)">Painel de ajustes do sistema.</p>
-      </div>
-    </section>
-  </main>
-
-  <div class="ticker-bar"><div class="ticker-bar-fill" id="tick-bar"></div></div>
-  <footer>
-    <div class="footer-left">
-      <span id="f-status">Conectando...</span>
-      <span class="latency-badge" id="f-latency">– ms</span>
-      <span class="update-counter" id="f-ups">0 ups</span>
-    </div>
-    <div class="footer-right">
-      <span id="f-time">–</span>
-      <span class="update-counter" id="f-ms">–</span>
-    </div>
-  </footer>
-</div>
-
-<script>
-// Tab Switching
-document.querySelectorAll('.nav-item').forEach(item => {
-  item.addEventListener('click', () => {
-    const tab = item.getAttribute('data-tab');
-    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-    document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
-    item.classList.add('active');
-    document.getElementById(tab).classList.add('active');
-  });
-});
-
-lucide.createIcons();
-
-// --- CHART.JS SETUP ---
-const CHART_DEFAULTS = {
-  animation: false,
-  responsive: true,
-  maintainAspectRatio: false,
-  plugins: { legend: { display: false } },
-  scales: {
-    x: { ticks: { color: '#8b949e', maxTicksLimit: 8, font: { size: 10 } }, grid: { color: '#1e2530' } },
-    y: { ticks: { color: '#8b949e', font: { size: 10 } }, grid: { color: '#1e2530' } }
-  }
-};
-
-const equityChart = new Chart(document.getElementById('equity-chart').getContext('2d'), {
-  type: 'line',
-  data: { labels: [], datasets: [{ data: [], borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.08)', borderWidth: 2, pointRadius: 0, fill: true, tension: 0.3 }] },
-  options: { ...CHART_DEFAULTS, scales: { ...CHART_DEFAULTS.scales, y: { ...CHART_DEFAULTS.scales.y, position: 'right' } } }
-});
-
-const zChart = new Chart(document.getElementById('z-chart').getContext('2d'), {
-  type: 'line',
-  data: {
-    labels: [],
-    datasets: [
-      { data: [], borderColor: '#FFB224', borderWidth: 2, pointRadius: 0, tension: 0.3, label: 'Z-score' },
-      { data: [], borderColor: '#f85149', borderDash: [4,4], borderWidth: 1.5, pointRadius: 0, label: '+Z' },
-      { data: [], borderColor: '#3fb950', borderDash: [4,4], borderWidth: 1.5, pointRadius: 0, label: '-Z' },
-      { data: [], borderColor: '#8b949e', borderWidth: 1.5, pointRadius: 0 }
-    ]
-  },
-  options: { ...CHART_DEFAULTS, plugins: { legend: { display: true, labels: { color: '#8b949e', font: { size: 10 }, boxWidth: 20 } } } }
-});
-
-// --- STATE & LIVE TRACKING ---
-let selectedSymbol = null, startedAt = null, lastData = null;
-const Z_ENTER = 2.0;
-let _prevValues = {};   // track previous values for flash effects
-let _updateCount = 0;
-let _lastRenderMs = 0;
-let _chartThrottle = 0; // only update charts every N frames
-
-function fmt(v, d=5) { return (v === null || isNaN(v)) ? '–' : Number(v).toFixed(d); }
-function fmtMoney(v) { return (v === null || v === undefined) ? '–' : Number(v).toLocaleString('pt-PT', { minimumFractionDigits: 2 }); }
-
-// Flash effect on value change
-function setLiveValue(el, newText, key) {
-  if (!el) return;
-  const prev = _prevValues[key];
-  const curr = newText;
-  if (prev !== undefined && prev !== curr) {
-    el.classList.remove('flash-up', 'flash-down');
-    void el.offsetWidth; // force reflow
-    const numPrev = parseFloat(String(prev).replace(/[^\d.,-]/g, '').replace(',', '.'));
-    const numCurr = parseFloat(String(curr).replace(/[^\d.,-]/g, '').replace(',', '.'));
-    if (!isNaN(numPrev) && !isNaN(numCurr)) {
-      el.classList.add(numCurr >= numPrev ? 'flash-up' : 'flash-down');
-    } else {
-      el.classList.add('flash-up');
-    }
-  }
-  el.textContent = curr;
-  _prevValues[key] = curr;
-}
-
-// Ticker bar animation
-function pulseTickBar() {
-  const bar = document.getElementById('tick-bar');
-  bar.style.width = '100%';
-  bar.style.transition = 'none';
-  bar.style.background = 'var(--green)';
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      bar.style.transition = 'width 0.2s linear, background 0.4s ease';
-      bar.style.width = '0%';
-      bar.style.background = 'var(--border)';
-    });
-  });
-}
-
-function render(data) {
-  const renderStart = performance.now();
-  lastData = data;
-  _updateCount++;
-
-  // Pulse ticker bar
-  pulseTickBar();
-
-  const acc = data.account || {};
-  document.getElementById('h-login').textContent = acc.login || '–';
-  document.getElementById('h-server').textContent = acc.server || '–';
-
-  if (!startedAt && data.started_at) startedAt = new Date(data.started_at);
-  if (startedAt) {
-    const d = Math.floor((Date.now() - startedAt) / 1000);
-    document.getElementById('h-uptime').textContent = `${String(Math.floor(d/3600)).padStart(2,'0')}:${String(Math.floor((d%3600)/60)).padStart(2,'0')}:${String(d%60).padStart(2,'0')}`;
-  }
-
-  const bal = acc.balance || 0, equ = acc.equity || 0, diff = equ - bal;
-  setLiveValue(document.getElementById('s-balance'), fmtMoney(bal) + ' ' + (acc.currency || ''), 'balance');
-  const equEl = document.getElementById('s-equity');
-  setLiveValue(equEl, fmtMoney(equ) + ' ' + (acc.currency || ''), 'equity');
-  equEl.className = 'stat-value ' + (diff >= 0 ? 'positive' : 'negative');
-  setLiveValue(document.getElementById('s-equity-diff-geral'), (diff >= 0 ? '+' : '') + fmtMoney(diff), 'equity-diff');
-  setLiveValue(document.getElementById('s-margin'), fmtMoney(acc.margin || 0), 'margin');
-
-  // Throttle chart updates (every 5th frame = ~1s)
-  _chartThrottle++;
-  if (_chartThrottle >= 5) {
-    _chartThrottle = 0;
-    const ec = data.equity_curve || [];
-    equityChart.data.labels = ec.map(p => p.t);
-    equityChart.data.datasets[0].data = ec.map(p => p.v);
-    equityChart.update('none');
-  }
-
-  const syms = data.symbols || {}, symKeys = Object.keys(syms);
-  const btnContainer = document.getElementById('symbol-btns');
-  if (btnContainer.children.length !== symKeys.length) {
-    btnContainer.innerHTML = '';
-    symKeys.forEach(s => {
-      const btn = document.createElement('button');
-      btn.textContent = s;
-      btn.style.cssText = 'background:#1e2530; border:1px solid #30363d; color:#8b949e; padding:4px 10px; border-radius:4px; cursor:pointer; font-size:11px;';
-      btn.onclick = () => { selectedSymbol = s; updateZChart(syms[s], s); };
-      btnContainer.appendChild(btn);
-    });
-    if (!selectedSymbol && symKeys.length > 0) selectedSymbol = symKeys[0];
-  }
-
-  const openPos = data.open_positions || [];
-  setLiveValue(document.getElementById('s-positions'), String(openPos.length), 'positions');
-  setLiveValue(document.getElementById('s-trades-today'), String((data.trades || []).length), 'trades-today');
-
-  // Render Symbols Table — with per-cell flash
-  const symbolsHtml = symKeys.map(sym => {
-    const s = syms[sym], z = parseFloat(s.z), pos = s.position;
-    const zPct = isNaN(z) ? 50 : Math.min(Math.max((z / 4 + 0.5) * 100, 0), 100);
-    const zColor = isNaN(z) ? '#8b949e' : (z < 0 ? '#3fb950' : '#f85149');
-    // Bid/Ask spread display
-    const bidAsk = (s.bid && s.ask) ? `<span style="font-size:10px;color:var(--muted)">${s.bid}/${s.ask}</span>` : '';
-    return `<tr>
-      <td><b>${sym}</b> ${bidAsk}</td>
-      <td><div class="z-bar-wrap"><span style="color:${zColor};font-weight:600;min-width:45px">${fmt(z,3)}</span><div class="z-bar-bg"><div class="z-bar-fill" style="left:${z<0?zPct+'%':'50%'};right:${z>=0?(100-zPct)+'%':'50%'};background:${zColor};"></div></div></div></td>
-      <td class="live-value">${fmt(s.close)}</td><td>${fmt(s.ma)}</td><td>${fmt(s.spread,1)}</td>
-      <td><span class="badge badge-${(s.signal||'').toLowerCase()}">${s.signal||'–'}</span></td>
-      <td><span class="badge badge-${(pos||'none').toLowerCase()}">${pos||'–'}</span></td>
-      <td class="${(s.pnl||0)>=0?'positive':'negative'}">${fmtMoney(s.pnl)}</td>
-    </tr>`;
-  }).join('');
-  document.getElementById('symbols-tbody').innerHTML = symbolsHtml || '<tr><td colspan="8" class="empty-state">Aguardando dados...</td></tr>';
-  document.getElementById('symbols-tbody-only').innerHTML = symbolsHtml;
-
-  if (_chartThrottle === 0 && selectedSymbol && syms[selectedSymbol]) updateZChart(syms[selectedSymbol], selectedSymbol);
-
-  renderOpenPositions(openPos);
-  renderTrades(data.trades || []);
-  renderMacro(syms);
-  renderQuality(data.system_health || {}, data.symbol_quality || {});
-
-  // Footer: live metrics
-  const now = new Date();
-  const ms = now.getMilliseconds().toString().padStart(3, '0');
-  document.getElementById('f-time').textContent = now.toLocaleTimeString('pt-PT') + '.' + ms;
-  document.getElementById('f-ms').textContent = data.tick_ts ? `tick ${data.tick_ts}` : '';
-
-  const renderMs = Math.round(performance.now() - renderStart);
-  const latEl = document.getElementById('f-latency');
-  latEl.textContent = renderMs + ' ms';
-  latEl.className = 'latency-badge' + (renderMs > 50 ? ' slow' : '');
-
-  document.getElementById('f-ups').textContent = _updateCount + ' ups';
-  _lastRenderMs = renderMs;
-}
-
-function updateZChart(s, name) {
-  document.getElementById('z-chart-label').textContent = name;
-  const h = s.zscore_history || [], n = h.length;
-  zChart.data.labels = h.map(p => p.t);
-  zChart.data.datasets[0].data = h.map(p => p.v);
-  zChart.data.datasets[1].data = Array(n).fill(Z_ENTER);
-  zChart.data.datasets[2].data = Array(n).fill(-Z_ENTER);
-  zChart.data.datasets[3].data = Array(n).fill(0);
-  zChart.update('none');
-}
-
-function renderOpenPositions(pos) {
-  const elGeral = document.getElementById('open-positions-list');
-  const elOnly = document.getElementById('open-positions-list-only');
-  if (!pos.length) {
-    const empty = '<div class="empty-state">Nenhuma posição aberta.</div>';
-    elGeral.innerHTML = empty; elOnly.innerHTML = empty;
-    return;
-  }
-  const html = pos.map(p => `
-    <div class="trade-row">
-      <div style="color:#8b949e">${p.time||'–'}</div><div><b>${p.symbol}</b></div>
-      <div><span class="badge badge-${p.type.toLowerCase()}">${p.type}</span></div>
-      <div>${fmt(p.entry)}</div><div style="color:#8b949e">${fmt(p.sl)}</div>
-      <div>${p.lots}</div><div class="${(p.profit||0)>=0?'positive':'negative'}"><b>${fmtMoney(p.profit)}</b></div>
-      <div style="color:#8b949e">${p.magic === 20240101 ? 'MR' : p.magic}</div>
-    </div>`).join('');
-  elGeral.innerHTML = html; elOnly.innerHTML = html;
-}
-
-function renderTrades(trades) {
-  const elGeral = document.getElementById('trades-list');
-  const elOnly = document.getElementById('trades-list-only');
-  if (!trades.length) {
-    const empty = '<div class="empty-state">Nenhum trade fechado.</div>';
-    elGeral.innerHTML = empty; elOnly.innerHTML = empty;
-    return;
-  }
-  const html = trades.map(t => `
-    <div class="trade-row">
-      <div style="color:#8b949e">${t.timestamp||'–'}</div><div><b>${t.symbol}</b></div>
-      <div><span class="badge badge-${(t.direction||'').toLowerCase()}">${t.direction}</span></div>
-      <div>${fmt(t.entry_price)}</div><div>${fmt(t.exit_price)}</div>
-      <div class="${(t.profit_currency||0)>=0?'positive':'negative'}"><b>${fmtMoney(t.profit_currency)}</b></div>
-      <div style="color:#8b949e;font-size:11px">${t.reason||'–'}</div>
-    </div>`).join('');
-  elGeral.innerHTML = html; elOnly.innerHTML = html;
-}
-
-function renderMacro(syms) {
-  const elGeral = document.getElementById('macro-content');
-  const elOnly = document.getElementById('macro-content-only');
-  const keys = Object.keys(syms);
-  if (!keys.length) {
-    const empty = '<div class="empty-state">Calculando macro...</div>';
-    elGeral.innerHTML = empty; elOnly.innerHTML = empty;
-    return;
-  }
-  const html = keys.map(sym => {
-    const s = syms[sym], score = parseFloat(s.macro_score ?? 0);
-    const pct = Math.min(Math.max((score + 1) / 2 * 100, 0), 100);
-    return `<div style="display:grid;grid-template-columns:90px 80px 100px 100px 1fr; gap:12px; padding:10px 4px; border-bottom:1px solid #1e2530; align-items:center">
-      <b>${sym}</b><span class="${score>=0?'positive':'negative'}">${score.toFixed(3)}</span>
-      <div class="z-bar-bg"><div class="z-bar-fill" style="left:${score<0?pct+'%':'50%'};right:${score>=0?(100-pct)+'%':'50%'};background:${score<0?'#f85149':'#3fb950'}"></div></div>
-      <span class="badge badge-${(s.macro_regime||'none').replace('_','')}">${s.macro_regime||'neutral'}</span>
-      <span style="color:#8b949e;font-size:11px">${(s.macro_reasons||[]).slice(0,2).join(' · ')}</span>
-    </div>`;
-  }).join('');
-  elGeral.innerHTML = html; elOnly.innerHTML = html;
-}
-
-function renderQuality(health, symQuality) {
-  if (health.grade) {
-    const gradeEl = document.getElementById('q-system-grade');
-    gradeEl.textContent = health.grade;
-    gradeEl.className = 'stat-value ' + (['A+','A','A-'].includes(health.grade) ? 'positive' : (health.grade === 'F' ? 'negative' : 'neutral'));
-    document.getElementById('q-system-status').textContent = health.status || '–';
-    document.getElementById('q-apis-online').textContent = `${health.apis_healthy}/${health.apis_healthy + health.apis_down}`;
-    document.getElementById('q-avg-uptime').textContent = `${(health.avg_uptime_24h || 0).toFixed(1)}% Uptime`;
-    document.getElementById('q-avg-quality').textContent = `${(health.avg_quality_score || 0).toFixed(0)}/100`;
-  }
-
-  const keys = Object.keys(symQuality);
-  if (keys.length) {
-    document.getElementById('quality-tbody').innerHTML = keys.map(sym => {
-      const q = symQuality[sym];
-      const comps = q.components || {};
-      return `<tr>
-        <td><b>${sym}</b></td>
-        <td>${q.total_score.toFixed(0)}</td>
-        <td><span class="badge badge-none">${q.grade}</span></td>
-        <td>${(comps.price_consensus / 0.25).toFixed(0)}%</td>
-        <td>${(comps.news_coverage / 0.15).toFixed(0)}%</td>
-        <td style="font-size:10px; color:var(--muted)">${q.recommendation}</td>
-      </tr>`;
-    }).join('');
-  }
-}
-
-function updateMarketSessions() {
-  const now = new Date();
-  const utcHour = now.getUTCHours();
-  const syd = (utcHour >= 22 || utcHour < 7), tky = (utcHour >= 0 && utcHour < 9), ldn = (utcHour >= 8 && utcHour < 17), ny = (utcHour >= 13 && utcHour < 22);
-  document.getElementById('sess-syd').className = 'session-pill' + (syd ? ' active' : '');
-  document.getElementById('sess-tky').className = 'session-pill' + (tky ? ' active' : '');
-  document.getElementById('sess-ldn').className = 'session-pill' + (ldn ? ' active' : '');
-  document.getElementById('sess-ny').className  = 'session-pill' + (ny ? ' active' : '');
-}
-
-function updateMarketClocks() {
-  const zones = {
-    'clock-syd': 'Australia/Sydney',
-    'clock-tky': 'Asia/Tokyo',
-    'clock-ldn': 'Europe/London',
-    'clock-ny':  'America/New_York'
-  };
-  const now = new Date();
-  for (const [id, tz] of Object.entries(zones)) {
-    const t = now.toLocaleTimeString('pt-PT', { timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    document.getElementById(id).textContent = t;
-  }
-}
-
-// --- WS with reconnect + live metrics ---
-let ws, _wsReconnects = 0;
-function connect() {
-  updateMarketSessions();
-  updateMarketClocks();
-  ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => {
-    _wsReconnects = 0;
-    document.getElementById('dot').classList.remove('offline');
-    document.getElementById('f-status').textContent = 'Online';
-  };
-  ws.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch(err) {} };
-  ws.onclose = () => {
-    document.getElementById('dot').classList.add('offline');
-    document.getElementById('f-status').textContent = 'Offline';
-    _wsReconnects++;
-    const delay = Math.min(1000 * _wsReconnects, 5000);
-    setTimeout(connect, delay);
-  };
-}
-connect();
-setInterval(updateMarketSessions, 60000);
-setInterval(updateMarketClocks, 1000);
-setInterval(() => { if (ws && ws.readyState === 1) ws.send('ping'); }, 5000);
-
-// Uptime counter — updates every second even between WS frames
-setInterval(() => {
-  if (startedAt) {
-    const d = Math.floor((Date.now() - startedAt) / 1000);
-    document.getElementById('h-uptime').textContent = `${String(Math.floor(d/3600)).padStart(2,'0')}:${String(Math.floor((d%3600)/60)).padStart(2,'0')}:${String(d%60).padStart(2,'0')}`;
-  }
-}, 1000);
-</script>
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="js/websocket.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>

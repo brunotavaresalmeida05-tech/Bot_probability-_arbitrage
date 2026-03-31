@@ -8,7 +8,13 @@ from datetime import datetime
 
 class PositionManager:
     def __init__(self):
-        self.positions = {}  # {symbol: {lots: [], avg_price: float, direction: str}}
+        self.positions = {}  # {symbol: {entries: [], avg_price: float, direction: str}}
+        self.pyramiding_tracker = {}
+        
+        # Pyramiding config
+        self.max_adds = 3  # Máximo 3 adições
+        self.min_profit_pct = 0.02  # 2% lucro entre adds
+        self.add_size_multiplier = 0.5  # Cada add = 50% do inicial
     
     def open_position(self, 
                      symbol: str,
@@ -18,63 +24,77 @@ class PositionManager:
         """Registra abertura de posição."""
         if symbol not in self.positions:
             self.positions[symbol] = {
-                'lots': [],
+                'entries': [],
                 'total_lots': 0.0,
                 'avg_price': 0.0,
                 'direction': direction
             }
         
         pos = self.positions[symbol]
-        pos['lots'].append({
-            'size': lot_size,
+        pos['entries'].append({
+            'lot': lot_size,
             'price': entry_price,
-            'opened_at': datetime.now()
+            'time': datetime.now()
         })
         
         # Recalcular média
-        total_value = sum(l['size'] * l['price'] for l in pos['lots'])
-        pos['total_lots'] = sum(l['size'] for l in pos['lots'])
+        total_value = sum(e['lot'] * e['price'] for e in pos['entries'])
+        pos['total_lots'] = sum(e['lot'] for e in pos['entries'])
         pos['avg_price'] = total_value / pos['total_lots']
     
-    def can_pyramid(self, 
-                   symbol: str,
-                   current_price: float,
-                   min_profit_pct=2.0) -> dict:
+    def can_add_to_position(self, symbol, current_price, avg_price):
         """
-        Verifica se pode adicionar à posição (pyramiding).
-        
-        Rules:
-        - Posição atual em lucro > min_profit_pct
-        - Máximo 3 entradas
+        Permite adicionar se:
+        1. Menos de max_adds
+        2. Lucro > min_profit_pct
         """
         if symbol not in self.positions:
-            return {'can_pyramid': False, 'reason': 'No position'}
+            return False
+
+        pos = self.positions[symbol]
+
+        if len(pos['entries']) >= self.max_adds:
+            return False
+
+        # Calcular lucro atual
+        if pos['direction'] in ['BUY', 'LONG']:
+            profit_pct = (current_price - avg_price) / avg_price
+        else:
+            profit_pct = (avg_price - current_price) / avg_price
         
+        return profit_pct >= self.min_profit_pct
+
+    def register_add(self, symbol: str, lot: float):
+        """Registra add de pyramiding"""
+        if symbol not in self.pyramiding_tracker:
+            self.pyramiding_tracker[symbol] = {'adds': 0, 'total_lot': lot}
+        self.pyramiding_tracker[symbol]['adds'] += 1
+        self.pyramiding_tracker[symbol]['total_lot'] += lot
+    
+    def add_to_position(self, symbol, price, initial_lot):
+        """
+        Adiciona à posição vencedora
+        """
+        if symbol not in self.positions:
+            return 0
+            
         pos = self.positions[symbol]
         
-        # Max 3 entradas
-        if len(pos['lots']) >= 3:
-            return {'can_pyramid': False, 'reason': 'Max entries (3)'}
+        # Lot reduzido (50% do inicial)
+        add_lot = initial_lot * self.add_size_multiplier
         
-        # Calcular P&L atual
-        if pos['direction'] == 'LONG':
-            pnl_pct = ((current_price - pos['avg_price']) 
-                      / pos['avg_price'] * 100)
-        else:
-            pnl_pct = ((pos['avg_price'] - current_price) 
-                      / pos['avg_price'] * 100)
+        pos['entries'].append({
+            'price': price,
+            'lot': add_lot,
+            'time': datetime.now()
+        })
         
-        if pnl_pct < min_profit_pct:
-            return {
-                'can_pyramid': False, 
-                'reason': f'Profit {pnl_pct:.1f}% < {min_profit_pct}%'
-            }
+        # Recalcular avg price
+        pos['total_lots'] = sum(e['lot'] for e in pos['entries'])
+        weighted_price = sum(e['price'] * e['lot'] for e in pos['entries'])
+        pos['avg_price'] = weighted_price / pos['total_lots']
         
-        return {
-            'can_pyramid': True,
-            'current_profit_pct': pnl_pct,
-            'entry_count': len(pos['lots'])
-        }
+        return add_lot
     
     def partial_close(self,
                      symbol: str,
@@ -95,23 +115,23 @@ class PositionManager:
         # Fechar FIFO (First In First Out)
         remaining = close_lots
         
-        for lot in pos['lots'][:]:
+        for entry in pos['entries'][:]:
             if remaining <= 0:
                 break
             
-            if lot['size'] <= remaining:
+            if entry['lot'] <= remaining:
                 # Fechar completamente este lote
-                remaining -= lot['size']
-                pos['lots'].remove(lot)
+                remaining -= entry['lot']
+                pos['entries'].remove(entry)
             else:
                 # Fechar parcialmente este lote
-                lot['size'] -= remaining
+                entry['lot'] -= remaining
                 remaining = 0
         
         # Recalcular
-        if pos['lots']:
-            total_value = sum(l['size'] * l['price'] for l in pos['lots'])
-            pos['total_lots'] = sum(l['size'] for l in pos['lots'])
+        if pos['entries']:
+            total_value = sum(e['lot'] * e['price'] for e in pos['entries'])
+            pos['total_lots'] = sum(e['lot'] for e in pos['entries'])
             pos['avg_price'] = total_value / pos['total_lots']
         else:
             del self.positions[symbol]
@@ -159,3 +179,24 @@ class PositionManager:
                 }
         
         return {'action': None}
+
+    def get_position_adds(self, symbol: str) -> int:
+        """
+        Retorna número de adds (pyramiding) já feitos numa posição
+        """
+        if symbol not in self.pyramiding_tracker:
+            return 0
+        
+        return self.pyramiding_tracker[symbol].get('adds', 0)
+    
+    def track_pyramiding_add(self, symbol: str):
+        """Registra um add de pyramiding"""
+        if symbol not in self.pyramiding_tracker:
+            self.pyramiding_tracker[symbol] = {'adds': 0}
+        
+        self.pyramiding_tracker[symbol]['adds'] += 1
+    
+    def reset_pyramiding(self, symbol: str):
+        """Reset tracking quando posição fecha"""
+        if symbol in self.pyramiding_tracker:
+            del self.pyramiding_tracker[symbol]

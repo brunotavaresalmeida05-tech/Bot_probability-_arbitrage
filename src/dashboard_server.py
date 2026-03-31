@@ -26,6 +26,9 @@ except ImportError:
 #  DATA STORE
 # ─────────────────────────────────────────────
 
+from src.analytics.performance_tracker import PerformanceTracker
+_tracker = PerformanceTracker(initial_balance=500.0)
+
 _lock = threading.Lock()
 
 _store: dict[str, Any] = {
@@ -36,6 +39,11 @@ _store: dict[str, Any] = {
     "open_positions": [],  # ← lido directamente do MT5
     "system_health": {},
     "symbol_quality": {},
+    "scaling": {},
+    "capital_scaling": {},
+    "projections": {},
+    "strategies_performance": [],
+    "realtime": {},
     "started_at": datetime.now().isoformat(),
     "last_update": None,
     "tick_ts": None,       # timestamp ms do último tick
@@ -43,6 +51,25 @@ _store: dict[str, Any] = {
 
 MAX_EQUITY_POINTS = 500
 MAX_TRADES = 50
+
+# ─────────────────────────────────────────────
+#  TRACKER UPDATER
+# ─────────────────────────────────────────────
+
+def _update_tracker_metrics():
+    """Recalcula métricas do tracker e actualiza o store."""
+    with _lock:
+        balance = _store["account"].get("balance", 0)
+        equity = _store["account"].get("equity", 0)
+        trades = _store["trades"]
+        open_pos = _store["open_positions"]
+        
+        _tracker.update_data(balance, equity, trades)
+        
+        _store["capital_scaling"] = _tracker.get_capital_scaling_progress()
+        _store["projections"] = _tracker.get_projections()
+        _store["strategies_performance"] = _tracker.get_strategy_performance()
+        _store["realtime"] = _tracker.get_realtime_tracking(open_pos)
 
 # ─────────────────────────────────────────────
 #  HEALTH & QUALITY UPDATERS
@@ -57,6 +84,56 @@ def update_symbol_quality(symbol: str, quality: dict):
     with _lock:
         _store["symbol_quality"][symbol] = quality
         _store["last_update"] = datetime.now().isoformat()
+
+# ─────────────────────────────────────────────
+#  SCALING UPDATERS
+# ─────────────────────────────────────────────
+
+def update_scaling(current_cap: float):
+    """Actualiza dados de scaling para o dashboard."""
+    try:
+        import config.settings as cfg
+        from src.risk.compounding_manager import CompoundingManager
+        
+        mgr = CompoundingManager(
+            initial_capital=500.0,
+            target_monthly_return=getattr(cfg, 'TARGET_MONTHLY_RETURN', 0.15)
+        )
+        mgr.current_capital = current_cap
+        
+        params = mgr.get_current_params()
+        
+        # Encontrar próximo milestone
+        next_m = 500
+        milestones = sorted(mgr.milestones.keys())
+        for m in milestones:
+            if m > current_cap:
+                next_m = m
+                break
+        else:
+            next_m = milestones[-1] * 2 # Fallback
+            
+        prev_m = 0
+        for m in reversed(milestones):
+            if m <= current_cap:
+                prev_m = m
+                break
+        
+        prog_pct = 0
+        if next_m > prev_m:
+            prog_pct = ((current_cap - prev_m) / (next_m - prev_m)) * 100
+            
+        with _lock:
+            _store["scaling"] = {
+                "current_capital": current_cap,
+                "next_milestone": next_m,
+                "progress_pct": min(prog_pct, 100),
+                "risk_per_trade": params['risk_per_trade'],
+                "max_positions": params['max_positions'],
+                "projections": mgr.project_growth(12)
+            }
+    except Exception as e:
+        print(f"Erro ao atualizar scaling dashboard: {e}")
 
 # ─────────────────────────────────────────────
 #  FAST TICK STREAMER  (preços a cada ~200ms)
@@ -248,8 +325,16 @@ async def _broadcast(data: str):
 
 async def broadcast_loop(interval: float = 0.2):
     """Broadcast a cada 200ms para updates em tempo real."""
+    counter = 0
     while True:
         await asyncio.sleep(interval)
+        
+        # Recalcular métricas pesadas a cada ~1s (5 ciclos de 200ms)
+        counter += 1
+        if counter >= 5:
+            _update_tracker_metrics()
+            counter = 0
+            
         data = json.dumps(get_snapshot())
         await _broadcast(data)
 

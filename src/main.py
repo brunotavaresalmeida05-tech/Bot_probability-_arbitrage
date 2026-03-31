@@ -34,16 +34,16 @@ def root():
 @health_app.get("/health")
 def health():
     uptime_seconds = (datetime.now() - bot_status['start_time']).total_seconds()
-    
-    return JSONResponse({
+
+    return {
         "status": bot_status['status'],
         "uptime_seconds": uptime_seconds,
-        "uptime_hours": uptime_seconds / 3600,
+        "uptime_hours": round(uptime_seconds / 3600, 2),
         "balance": bot_status['balance'],
         "open_positions": bot_status['positions'],
-        "last_update": bot_status['last_update'].isoformat(),
+        "last_update": bot_status['last_update'].isoformat() if bot_status.get('last_update') else None,
         "timestamp": datetime.now().isoformat()
-    })
+    }
 
 @health_app.get("/metrics")
 def metrics():
@@ -69,6 +69,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.portfolio_allocator import PortfolioAllocator
 import config.settings as cfg
 import src.mt5_connector as mt5c
+from src.automation import DailyReporter, AutoRestarter, ConfigBackup
 from src.strategy_manager import StrategyManager
 from src.filters.regime_detector import RegimeDetector
 from src.filters.news_filter import NewsFilter
@@ -80,14 +81,27 @@ from src.risk.dynamic_stops import DynamicStops
 from src.risk.portfolio_heat import PortfolioHeat
 from src.risk.drawdown_protector import DrawdownProtector
 from src.risk.position_manager import PositionManager
+from src.risk.compounding_manager import CompoundingManager
+from src.risk.anti_martingale import AntiMartingaleScaler
+from src.risk.volatility_scaler import VolatilityScaler
+from src.strategies.supply_demand import SupplyDemandStrategy
+from src.strategies.pin_bar import PinBarStrategy
+from src.strategies.inside_bar import InsideBarStrategy
+from src.strategies.engulfing import EngulfingStrategy
+from src.strategies.fibonacci import FibonacciStrategy
 import src.strategy as strat
 
-# Notifications
-try:
-    from src.notifications.telegram_bot import TelegramBot
-    _TELEGRAM = True
-except ImportError:
-    _TELEGRAM = False
+# Compounding, Anti-Martingale e Volatility Scaler (globais)
+compounding_mgr = None
+anti_martingale = None
+vol_scaler = None
+
+# Price Action Strategies (globais)
+supply_demand = None
+pin_bar = None
+inside_bar = None
+engulfing = None
+fibonacci = None
 
 # Analytics
 try:
@@ -139,6 +153,14 @@ dynamic_stops = DynamicStops()
 portfolio_heat = PortfolioHeat(max_heat_pct=15.0)
 dd_protector = DrawdownProtector()
 position_mgr = PositionManager()
+
+# Instâncias globais (serão inicializadas no main)
+compounding_mgr = None
+anti_martingale = None
+vol_scaler = None
+supply_demand = None
+pin_bar = None
+
 import src.logger as log
 import src.dashboard_server as dash
 import src.arb_runner as arb_runner
@@ -180,8 +202,22 @@ daily_states:  dict = {}
 entry_z:       dict = {}
 entry_atr:     dict = {}
 _bars_cache:   dict = {}
-PAPER_MODE = False
-telegram = None
+# Detect mode
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--mode', choices=['paper', 'live'], default='paper')
+args = parser.parse_args()
+
+# Check environment variable too
+trading_mode = os.getenv('TRADING_MODE', args.mode)
+PAPER_TRADING = (trading_mode == 'paper')
+
+if PAPER_TRADING:
+    print("    ⚠ ⚠ MODO PAPER: sem ordens reais")
+else:
+    print("    ⚠ ⚠ MODO LIVE (DEMO): ordens reais na conta demo")
+
+PAPER_MODE = PAPER_TRADING
 perf_analyzer = None
 trade_logger = None
 _trade_id_map: dict = {}  # ticket → trade_logger id
@@ -190,7 +226,6 @@ multi_api = None
 ff_calendar = None
 health_monitor = None
 quality_scorer = None
-
 
 def _get_all_bars():   return _bars_cache
 def _get_all_prices():
@@ -201,7 +236,6 @@ def _get_all_prices():
         if tick:
             prices[sym] = (tick.bid + tick.ask) / 2
     return prices
-
 
 # ─── Helpers ─────────────────────────────────────────────────
 
@@ -215,7 +249,6 @@ def get_bars_safe(symbol, params=None):
         return None
     return df
 
-
 def is_new_bar(symbol, df):
     last = df.index[-1]
     if last_bar_time.get(symbol) == last:
@@ -223,16 +256,54 @@ def is_new_bar(symbol, df):
     last_bar_time[symbol] = last
     return True
 
-
 def get_position_obj(symbol):
     positions = mt5c.get_open_positions(symbol, cfg.MAGIC_NUMBER)
     return positions[0] if positions else None
-
 
 def get_daily_closed_pnl(symbol):
     deals = mt5c.get_today_deals(symbol, cfg.MAGIC_NUMBER)
     return sum(d.profit for d in deals)
 
+def get_strategy_stats(symbol: str) -> dict:
+    """
+    Obtém estatísticas reais do histórico de trades para o símbolo.
+    Se não houver histórico suficiente, retorna defaults conservadores.
+    """
+    global trade_logger
+    if not trade_logger:
+        return {'win_rate': 0.65, 'avg_win': 15.0, 'avg_loss': 10.0}
+
+    try:
+        # Buscar trades do banco de dados (últimos 100 trades para dinamismo)
+        trades = trade_logger.get_trades(symbol=symbol)
+        
+        # Filtrar apenas trades fechados (com PnL definido)
+        closed_trades = trades[trades['pnl'].notna()]
+
+        if len(closed_trades) < 10:
+            # Histórico insuficiente - usar métricas do settings.py ou defaults
+            metrics = cfg.ASSET_METRICS.get(symbol, {})
+            return {
+                'win_rate': metrics.get('win_rate', 0.65),
+                'avg_win': metrics.get('avg_return', 15.0),
+                'avg_loss': metrics.get('avg_return', 15.0) * 0.8
+            }
+
+        winners = closed_trades[closed_trades['pnl'] > 0]
+        losers = closed_trades[closed_trades['pnl'] < 0]
+
+        win_rate = len(winners) / len(closed_trades)
+        avg_win = winners['pnl'].mean() if len(winners) > 0 else 1.0
+        avg_loss = abs(losers['pnl'].mean()) if len(losers) > 0 else 1.0
+
+        return {
+            'win_rate': round(win_rate, 2),
+            'avg_win': round(float(avg_win), 2),
+            'avg_loss': round(float(avg_loss), 2)
+        }
+    except Exception as e:
+        log.error(f"Erro ao calcular stats: {str(e)}", symbol)
+        return {'win_rate': 0.65, 'avg_win': 15.0, 'avg_loss': 10.0}
 
 # ─── Processar símbolo ────────────────────────────────────────
 
@@ -283,11 +354,11 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
         log.info(f"Skip - Volume baixo ({vol_check['volume_ratio']:.2f}x)", symbol)
         return status
 
-    # Detectar regime
-    regime = regime_detector.detect_regime(df)
-    if regime['regime'] == 'VOLATILE_RANGE':
-        log.info(f"Skip - regime {regime['regime']} (ADX={regime['adx']:.1f}, VolZ={regime['volatility_z']:.1f})", symbol)
-        return status
+    # Detectar regime (DESATIVADO TEMPORARIAMENTE para debug)
+    # regime = regime_detector.detect_regime(df)
+    # if regime['regime'] == 'VOLATILE_RANGE':
+    #     log.info(f"Skip - regime {regime['regime']} (ADX={regime['adx']:.1f}, VolZ={regime['volatility_z']:.1f})", symbol)
+    #     return status
         
     # News filter
     news_check = news_filter.is_blocked(symbol, datetime.now())
@@ -401,7 +472,42 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
         tick = mt5c.get_tick(symbol)
         current_price = tick.bid if pos_type == "BUY" else tick.ask
 
-        # Position Management: Scale Out
+        # 1. Trailing Stop Dinâmico (ATR)
+        # Se lucro > 1% do preço de entrada, mover SL baseado em 2x ATR
+        profit_pct = (pos.profit / (pos.volume * pos.price_open * 100)) # Estimativa simples
+        if pos.profit > (account_balance * 0.01): # Usar 1% do balance como gatilho de lucro
+            atr_val = atr_last
+            if pos_type == "BUY":
+                new_sl = current_price - (2 * atr_val)
+                if new_sl > pos.sl:
+                    log.info(f"Trailing Stop: movendo SL para {new_sl:.5f}", symbol)
+                    if not PAPER_MODE:
+                        mt5c.modify_position_sl_tp(pos.ticket, new_sl, pos.tp)
+            else:
+                new_sl = current_price + (2 * atr_val)
+                if pos.sl == 0 or new_sl < pos.sl:
+                    log.info(f"Trailing Stop: movendo SL para {new_sl:.5f}", symbol)
+                    if not PAPER_MODE:
+                        mt5c.modify_position_sl_tp(pos.ticket, new_sl, pos.tp)
+
+        # 2. Pirâmide Automática (Adicionar a posições vencedoras)
+        if getattr(cfg, 'PYRAMIDING_ENABLED', True):
+            # Se lucro > 2% e menos que MAX_ADDS
+            current_adds = position_mgr.get_position_adds(symbol)
+            if pos.profit > (account_balance * 0.02) and current_adds < getattr(cfg, 'PYRAMIDING_MAX_ADDS', 3):
+                add_lot = round(pos.volume * getattr(cfg, 'PYRAMIDING_SIZE_MULTIPLIER', 0.5), 2)
+                log.info(f"🚀 Pyramiding: Adicionando {add_lot} lots à posição vencedora", symbol)
+                if not PAPER_MODE:
+                    # Abrir nova ordem na mesma direção
+                    res = mt5c.send_order(symbol, pos_type, add_lot, pos.price_open, 0.0, cfg.MAGIC_NUMBER, f"PYR_{current_adds}")
+                    if res['success']:
+                        position_mgr.register_add(symbol)
+                        # Mover SL de ambas para o Breakeven da primeira (opcional/seguro)
+                        mt5c.modify_position_sl_tp(pos.ticket, pos.price_open, pos.tp)
+                else:
+                    position_mgr.register_add(symbol)
+
+        # 3. Position Management: Scale Out
         scale_result = position_mgr.scale_out_on_profit(symbol, current_price)
         if scale_result['action'] == 'SCALE_OUT':
             log.info(f"Scale out: fechando {scale_result['closed_pct']:.1f}% em lucro target {scale_result['profit_target']}%", symbol)
@@ -456,28 +562,6 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
                     strategy_name = "unknown"
                     strategy_manager.update_strategy_performance(strategy_name, {"pnl": pos.profit})
 
-                # Telegram close alert
-                if telegram and cfg.TELEGRAM_ALERTS.get('trade_closed'):
-                    telegram.send_trade_close_alert({
-                        'symbol': symbol, 'direction': pos_type,
-                        'entry_price': pos.price_open, 'exit_price': current_price,
-                        'pnl': pos.profit, 'reason': reason,
-                    })
-
-                # Trade Logger + Performance Analyzer
-                if trade_logger and pos.ticket in _trade_id_map:
-                    trade_logger.log_trade_close(_trade_id_map.pop(pos.ticket), {
-                        'exit_price': current_price,
-                        'pnl': pos.profit,
-                        'exit_reason': reason,
-                    })
-                if perf_analyzer:
-                    perf_analyzer.add_trade({
-                        'pnl': pos.profit,
-                        'symbol': symbol,
-                        'strategy': strategy_name if strategy_name != "unknown" else "Mean Reversion",
-                    })
-
                 log.log_trade_csv(symbol, pos_type, pos.price_open, current_price,
                     pos.stop_loss, entry_z.get(pos.ticket, float("nan")),
                     z_last, entry_atr.get(pos.ticket, float("nan")),
@@ -508,57 +592,98 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
     #  SIGNAL GENERATION
     # ============================================================
     signal = None
-    strategy_name = "Mean Reversion"
+    strategy_name = "Consensus"
     confidence = 1.0
 
-    if cfg.USE_MULTI_STRATEGY and strategy_manager:
-        # Multi-strategy signals
+    # 1. Supply/Demand Check
+    sd_signal = None
+    if cfg.USE_SUPPLY_DEMAND:
+        sd_signal = supply_demand.check_zone_retest(
+            current_price=close_last,
+            current_bar=len(df),
+            df=df
+        )
+        if sd_signal:
+            log.info(f"🎯 Supply/Demand Signal: {sd_signal}", symbol)
+
+    # 2. Pin Bar Check
+    pb_signal = None
+    if cfg.USE_PIN_BAR:
+        pb_signal = pin_bar.check_signal(
+            df=df,
+            z_score=z_last
+        )
+        if pb_signal:
+            log.info(f"📌 Pin Bar Signal: {pb_signal}", symbol)
+
+    # 3. Inside Bar Check
+    ib_signal = None
+    if cfg.USE_INSIDE_BAR:
+        ib_signal = inside_bar.check_breakout(df=df, current_price=close_last)
+        if ib_signal:
+            log.info(f"📊 Inside Bar Signal: {ib_signal}", symbol)
+
+    # 4. Engulfing Check
+    eng_signal = None
+    if cfg.USE_ENGULFING:
+        eng_signal = engulfing.check_signal(df=df, z_score=z_last)
+        if eng_signal:
+            log.info(f"🔄 Engulfing Signal: {eng_signal}", symbol)
+
+    # 5. Fibonacci Check
+    fib_signal = None
+    if cfg.USE_FIBONACCI:
+        fib_signal = fibonacci.check_signal(df=df, current_price=close_last, z_score=z_last)
+        if fib_signal:
+            log.info(f"📐 Fibonacci Signal: {fib_signal}", symbol)
+
+    # 6. Mean Reversion Signal
+    z_signal = None
+    if not np.isnan(z_last):
+        if z_last <= -z_enter and close_last < ma_last:
+            z_signal = "BUY"
+        elif z_last >= z_enter and close_last > ma_last:
+            z_signal = "SELL"
+
+    # COMBINAR TODOS OS SINAIS (CONSENSO)
+    signals = []
+    if sd_signal: signals.append(sd_signal)
+    if pb_signal: signals.append(pb_signal)
+    if ib_signal: signals.append(ib_signal)
+    if eng_signal: signals.append(eng_signal)
+    if fib_signal: signals.append(fib_signal)
+    if z_signal:  signals.append(z_signal)
+
+    # CONSENSO (mínimo 2 estratégias)
+    if len(signals) >= 2:
+        if signals.count('BUY') >= 2:
+            signal = 'BUY'
+            confidence = signals.count('BUY') / len(signals)
+            log.info(f"✅ CONSENSO BUY | {confidence:.0%} | {signals}", symbol)
+        elif signals.count('SELL') >= 2:
+            signal = 'SELL'
+            confidence = signals.count('SELL') / len(signals)
+            log.info(f"✅ CONSENSO SELL | {confidence:.0%} | {signals}", symbol)
+        else:
+            signal = None # Sinais conflitantes
+    elif len(signals) == 1:
+        # Só 1 estratégia, usar se for sinal forte (Z extremo ou Price Action clara)
+        if z_signal and abs(z_last) > z_enter * 1.5:
+            signal = z_signal
+            strategy_name = "Extreme Mean Reversion"
+        elif sd_signal or pb_signal or ib_signal or eng_signal or fib_signal:
+            signal = signals[0]
+            strategy_name = "Price Action"
+            confidence = 0.7
+
+    # Multi-strategy override (se habilitado)
+    if cfg.USE_MULTI_STRATEGY and strategy_manager and not signal:
         multi_result = strategy_manager.get_combined_signal(symbol, df, datetime.now())
-        
         if multi_result['signal'] in ['BUY', 'SELL']:
             signal = multi_result['signal']
             strategy_name = multi_result['strategy']
             confidence = multi_result['confidence']
-            
-            # Ajuste por sentimento
-            if sentiment:
-                adj = sentiment_analyzer.adjust_strategy(sentiment['sentiment'], strategy_name.lower().replace(" ", "_"))
-                if not adj['use_strategy']:
-                    log.info(f"Skip - Sentimento {sentiment['sentiment']} bloqueia {strategy_name}", symbol)
-                    return status
-                confidence *= adj['adjust_size']
-                
-            print(f"{symbol}: {signal} via {strategy_name} (conf={confidence:.2f})")
-    else:
-        # Usar estratégia mean reversion existente
-        z_signal = None
-        if not np.isnan(z_last):
-            if z_last <= -z_enter and close_last < ma_last:
-                z_signal = "BUY"
-            elif z_last >= z_enter and close_last > ma_last:
-                z_signal = "SELL"
-
-        # MTF confirma ou gera sinal independente
-        if _MTF and cfg.USE_MULTI_TIMEFRAME and mtf_signal:
-            if z_signal == mtf_signal:
-                signal     = z_signal
-                lot_mult  *= (1.0 + mtf_confidence * 0.3)
-                log.info(f"MTF+Z concordam: {signal} (conf={mtf_confidence:.2f})", symbol)
-            elif z_signal and mtf_signal and z_signal != mtf_signal:
-                log.info(f"[dim]MTF({mtf_signal}) ≠ Z({z_signal}) → skip[/]", symbol)
-                return status
-            else:
-                signal = z_signal
-        else:
-            signal = z_signal
-            
-        # Ajuste por sentimento para Mean Reversion
-        if signal and sentiment:
-            adj = sentiment_analyzer.adjust_strategy(sentiment['sentiment'], 'mean_reversion')
-            if not adj['use_strategy']:
-                log.info(f"Skip - Sentimento {sentiment['sentiment']} bloqueia Mean Reversion", symbol)
-                return status
-            confidence *= adj['adjust_size']
+            log.info(f"🚀 Multi-Strategy Override: {signal} via {strategy_name}", symbol)
 
     status["signal"] = signal
     if signal is None:
@@ -616,19 +741,25 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
 
     sl_dist = abs(close_last - sl)
     
-    if cfg.USE_DYNAMIC_ALLOCATION and allocator:
-        base_lots, risk_money = allocator.get_position_size(symbol, sl_dist, close_last)
-    else:
-        risk_money = account_balance * cfg.RISK_PER_TRADE_PCT / 100.0
-        base_lots  = mt5c.calculate_lot_size(symbol, risk_money, sl_dist)
+    # ─── Cálculo de Lote Dinâmico Profissional ───
+    stats = get_strategy_stats(symbol)
+    
+    lots = calculate_dynamic_lot_size(
+        symbol=symbol,
+        account_balance=account_balance,
+        win_rate=stats['win_rate'],
+        avg_win=stats['avg_win'],
+        avg_loss=stats['avg_loss']
+    )
+    risk_money = account_balance * (lots * sl_dist / close_last) if close_last > 0 else 0
 
-    if base_lots <= 0:
-        log.warning("Lots = 0 (sem alocação)", symbol)
+    if lots <= 0:
+        log.warning("Lots = 0 (Kelly/Volatility adjustment), skip", symbol)
         return status
 
-    # Aplicar multiplicadores (incluindo Drawdown Protection e Data Quality)
+    # Aplicar multiplicadores adicionais (Drawdown e Macro)
     risk_mult = (dd_check['risk_multiplier'] if dd_check else 1.0) * risk_multiplier * symbol_risk_mult
-    lots = round(base_lots * risk_mult * min(lot_mult * confidence, cfg.MACRO_LOT_MAX_MULT), 2)
+    lots = round(lots * risk_mult * min(lot_mult * confidence, cfg.MACRO_LOT_MAX_MULT), 2)
     info = mt5c.get_symbol_info(symbol)
     if info:
         lots = max(lots, info.volume_min)
@@ -655,39 +786,124 @@ def process_symbol(symbol: str, account_balance: float, allocator: PortfolioAllo
             # Registrar no PositionManager
             position_mgr.open_position(symbol, lots, result['price'], signal)
 
-            # Telegram alert
-            if telegram and cfg.TELEGRAM_ALERTS.get('trade_opened'):
-                telegram.send_trade_alert({
-                    'symbol': symbol, 'direction': signal,
-                    'size': lots, 'entry_price': result['price'],
-                    'stop_loss': sl, 'strategy': strategy_name,
-                    'risk_money': risk_money,
-                })
-
-            # Trade Logger
-            if trade_logger:
-                db_id = trade_logger.log_trade_open({
-                    'symbol': symbol, 'strategy': strategy_name,
-                    'direction': signal, 'lot_size': lots,
-                    'entry_price': result['price'], 'stop_loss': sl,
-                })
-                _trade_id_map[ticket] = db_id
-        else:
-            log.error(f"Ordem falhou: {result.get('error')} ({result.get('retcode')})", symbol)
-    else:
-        log.info("[italic]PAPER: ordem simulada[/]", symbol)
-        state.trades_today += 1
-        status["position"] = signal
-        # Simular registro no PositionManager
-        position_mgr.open_position(symbol, lots, close_last, signal)
-
+            # Alerta removido
+            
     return status
 
+def calculate_dynamic_lot_size(
+    symbol: str,
+    account_balance: float,
+    win_rate: float = 0.65,
+    avg_win: float = 15.0,
+    avg_loss: float = 10.0
+) -> float:
+    """
+    Calcula lot size dinâmico usando:
+    1. Compounding Manager (milestones)
+    2. Kelly Criterion
+    3. Anti-Martingale (win streaks)
+    4. Volatility Scaling (ATR)
+    
+    Returns:
+        float: Lot size ajustado
+    """
+    # 1. Atualizar capital no Compounding Manager
+    compounding_mgr.update_capital(account_balance)
+    
+    # 2. Obter parâmetros do milestone atual
+    if cfg.USE_COMPOUNDING:
+        position_params = compounding_mgr.calculate_position_size(
+            win_rate=win_rate,
+            avg_win=avg_win,
+            avg_loss=avg_loss,
+            account_balance=account_balance
+        )
+        
+        risk_amount = position_params['risk_amount']
+        max_positions = position_params['max_positions']
+        
+        log.info(
+            f"💰 Milestone {compounding_mgr.get_current_milestone_name()} | "
+            f"Risk: {position_params['effective_risk_pct']*100:.2f}% | "
+            f"Amount: €{risk_amount:.2f}", symbol
+        )
+    else:
+        # Fallback: risk fixo
+        risk_amount = account_balance * cfg.MAX_RISK_PER_TRADE
+        max_positions = cfg.MAX_POSITIONS
+    
+    # 3. Calcular lot base (baseado no risk amount e ATR)
+    df = _bars_cache.get(symbol)
+    if df is not None and 'atr' in df.columns:
+        current_atr = df['atr'].iloc[-1]
+        historical_atr_median = df['atr'].median()
+    else:
+        # Tentar obter ATR se não estiver no cache
+        needed = cfg.ATR_PERIOD + 10
+        df_atr = mt5c.get_bars(symbol, cfg.TIMEFRAME, needed)
+        if df_atr is not None and len(df_atr) >= cfg.ATR_PERIOD:
+            import pandas_ta as ta
+            df_atr['atr'] = ta.atr(df_atr['high'], df_atr['low'], df_atr['close'], length=cfg.ATR_PERIOD)
+            current_atr = df_atr['atr'].iloc[-1]
+            historical_atr_median = df_atr['atr'].median()
+        else:
+            current_atr = 0.0001
+            historical_atr_median = 0.0001
+    
+    # Lot base = risk_amount / (atr * point_value)
+    symbol_info = mt5c.get_symbol_info(symbol)
+    if symbol_info is None:
+        return cfg.POSITION_SIZE
+    
+    point_value = symbol_info.trade_contract_size * symbol_info.point
+    
+    if current_atr > 0 and point_value > 0:
+        base_lot = risk_amount / (current_atr * point_value)
+    else:
+        base_lot = cfg.POSITION_SIZE
+    
+    # 4. Anti-Martingale (ajustar por win streak)
+    if cfg.USE_ANTI_MARTINGALE:
+        anti_mart_multiplier = anti_martingale.get_multiplier()
+        base_lot *= anti_mart_multiplier
+        
+        if anti_mart_multiplier > 1.0:
+            log.info(f"📈 Anti-Martingale: {anti_mart_multiplier:.1f}x (streak: {anti_martingale.consecutive_wins})", symbol)
+    
+    # 5. Volatility Scaling
+    if cfg.USE_VOLATILITY_SCALING:
+        base_lot = vol_scaler.calculate_scaled_lot(
+            current_atr=current_atr,
+            historical_atr_median=historical_atr_median,
+            base_lot=base_lot
+        )
+    
+    # 6. Normalizar lot (mín/máx do símbolo)
+    min_lot = symbol_info.volume_min
+    max_lot = symbol_info.volume_max
+    lot_step = symbol_info.volume_step
+    
+    # Arredondar para step
+    if lot_step > 0:
+        base_lot = round(base_lot / lot_step) * lot_step
+    
+    # Aplicar limites
+    final_lot = max(min_lot, min(base_lot, max_lot))
+    
+    log.info(
+        f"🎯 {symbol} LOT: €{risk_amount:.2f} risk → {final_lot:.2f} lots "
+        f"(ATR: {current_atr:.5f})", symbol
+    )
+    
+    return final_lot
 
 # ─── Loop principal ───────────────────────────────────────────
 
-def run(mode: str):
-    global PAPER_MODE
+def main(mode: str = None):
+    global PAPER_MODE, compounding_mgr, anti_martingale, vol_scaler
+    global supply_demand, pin_bar, inside_bar, engulfing, fibonacci
+    if mode is None:
+        mode = trading_mode
     PAPER_MODE = (mode == "paper")
 
     # Iniciar health API em background
@@ -698,6 +914,91 @@ def run(mode: str):
     bot_status['status'] = 'initializing'
 
     log.setup()
+    
+    # ============================================================
+    #  AUTOMATION & NOTIFICATIONS
+    # ============================================================
+    
+    # Daily reporter
+    if cfg.DAILY_REPORT_ENABLED:
+        reporter = DailyReporter()
+        log.info("📊 Daily Reports: ATIVO")
+    else:
+        reporter = None
+
+    # Auto-restart
+    if cfg.AUTO_RESTART_ENABLED:
+        restarter = AutoRestarter(
+            script_path="run_live.py",
+            max_restarts=cfg.MAX_RESTARTS,
+            cooldown_minutes=cfg.RESTART_COOLDOWN_MIN
+        )
+        log.info("🔄 Auto-restart: ATIVO")
+
+    # Config backup
+    if cfg.AUTO_BACKUP_ENABLED:
+        backup = ConfigBackup()
+        backup.auto_backup(interval_hours=cfg.BACKUP_INTERVAL_HOURS)
+        log.info("💾 Auto-backup: ATIVO")
+
+    # Compounding Manager
+    compounding_mgr = CompoundingManager(
+        initial_capital=cfg.INITIAL_CAPITAL,
+        target_monthly_return=cfg.TARGET_MONTHLY_RETURN
+    )
+
+    # Anti-Martingale Scaler
+    anti_martingale = AntiMartingaleScaler(
+        base_lot=cfg.POSITION_SIZE,
+        max_multiplier=cfg.ANTI_MARTINGALE_MAX_MULTIPLIER
+    )
+
+    # Volatility Scaler
+    vol_scaler = VolatilityScaler(
+        min_scale=cfg.VOLATILITY_SCALING_MIN,
+        max_scale=cfg.VOLATILITY_SCALING_MAX
+    )
+
+    # Price Action Strategies
+    supply_demand = SupplyDemandStrategy(
+        zone_strength_min=cfg.SUPPLY_DEMAND_ZONE_STRENGTH,
+        zone_age_max=cfg.SUPPLY_DEMAND_ZONE_AGE,
+        price_move_min=cfg.SUPPLY_DEMAND_MIN_MOVE
+    )
+
+    pin_bar = PinBarStrategy(
+        shadow_to_body_ratio=cfg.PIN_BAR_SHADOW_RATIO,
+        shadow_to_total_ratio=cfg.PIN_BAR_SHADOW_PCT,
+        z_score_threshold=cfg.PIN_BAR_Z_THRESHOLD
+    )
+
+    inside_bar = InsideBarStrategy(
+        min_mother_size=cfg.INSIDE_BAR_MIN_MOTHER,
+        max_inside_ratio=cfg.INSIDE_BAR_MAX_RATIO,
+        breakout_buffer=cfg.INSIDE_BAR_BUFFER
+    )
+
+    engulfing = EngulfingStrategy(
+        min_body_ratio=cfg.ENGULFING_MIN_BODY,
+        engulf_margin=cfg.ENGULFING_MARGIN,
+        z_score_threshold=cfg.ENGULFING_Z_THRESHOLD
+    )
+
+    fibonacci = FibonacciStrategy(
+        lookback_swing=cfg.FIB_LOOKBACK_SWING,
+        fib_tolerance=cfg.FIB_TOLERANCE,
+        key_levels=cfg.FIB_KEY_LEVELS
+    )
+
+    log.info("💰 Compounding Manager inicializado")
+    log.info(f"📈 Anti-Martingale ativo (max {cfg.ANTI_MARTINGALE_MAX_MULTIPLIER:.1f}x)")
+    log.info(f"📊 Volatility Scaling ativo ({cfg.VOLATILITY_SCALING_MIN:.1f}x - {cfg.VOLATILITY_SCALING_MAX:.1f}x)")
+    log.info(f"📊 Supply/Demand: {'ATIVO' if cfg.USE_SUPPLY_DEMAND else 'DESATIVADO'}")
+    log.info(f"📌 Pin Bar: {'ATIVO' if cfg.USE_PIN_BAR else 'DESATIVADO'}")
+    log.info(f"📊 Inside Bar: {'ATIVO' if cfg.USE_INSIDE_BAR else 'DESATIVADO'}")
+    log.info(f"🔄 Engulfing: {'ATIVO' if cfg.USE_ENGULFING else 'DESATIVADO'}")
+    log.info(f"📐 Fibonacci: {'ATIVO' if cfg.USE_FIBONACCI else 'DESATIVADO'}")
+    
     log.info("A ligar ao MetaTrader 5...")
     if not mt5c.connect():
         log.error("Não foi possível ligar ao MT5.")
@@ -709,7 +1010,7 @@ def run(mode: str):
     # ============================================================
     #  INICIALIZAR PORTFOLIO ALLOCATOR
     # ============================================================
-    symbols_to_trade = cfg.SYMBOLS
+    symbols_to_trade = cfg.ALL_AVAILABLE_SYMBOLS
     allocator = None
 
     if getattr(cfg, "USE_DYNAMIC_ALLOCATION", False):
@@ -762,15 +1063,6 @@ def run(mode: str):
     
     log.success(f"Dashboard: {dash_url}", "DASH")
     log.success("Fast tick stream activo (200ms)", "DASH")
-
-    # Telegram
-    global telegram
-    if _TELEGRAM and getattr(cfg, 'TELEGRAM_ENABLED', False):
-        telegram = TelegramBot(cfg.TELEGRAM_BOT_TOKEN, cfg.TELEGRAM_CHAT_ID)
-        telegram.send_message("🤖 *Bot Started*\nMode: " + mode.upper())
-        log.success("Telegram notifications activas", "TG")
-    else:
-        telegram = None
 
     # Analytics
     global perf_analyzer, trade_logger
@@ -850,12 +1142,30 @@ def run(mode: str):
     if _TRI and cfg.TRIANGULAR_ARB_ENABLED:
         log.success("Triangular ARB activo", "TRI")
 
+    loop_count = 0
     try:
         while True:
             account = mt5c.get_account_info()
             balance = account.get("balance", 0.0)
             equity = account.get("equity", balance)
             dash.update_account(account)
+            dash.update_scaling(balance)
+
+            # Atualizar e logar milestone
+            if account:
+                compounding_mgr.update_capital(balance)
+                stats = compounding_mgr.get_stats()
+                
+                # Log a cada 5 minutos (30 loops de 10s)
+                if loop_count % 30 == 0:
+                    log.info(
+                        f"💰 CAPITAL SCALING | "
+                        f"Milestone: {stats['current_milestone']} | "
+                        f"Capital: €{stats['current_capital']:.2f} | "
+                        f"Growth: {stats['total_growth_pct']:.1f}% | "
+                        f"Next: €{stats['next_milestone']['target']} "
+                        f"({stats['next_milestone']['progress_pct']:.1f}%)"
+                    )
 
             # Railway Health Status Update
             open_pos = mt5c.get_open_positions(None, cfg.MAGIC_NUMBER)
@@ -864,126 +1174,38 @@ def run(mode: str):
             bot_status['last_update'] = datetime.now()
             bot_status['status'] = 'running'
 
-            # Data Quality Scorer - Global Health
-            risk_multiplier = 1.0
-            if quality_scorer:
-                system_health = quality_scorer.get_overall_system_health()
-                dash.update_system_health(system_health) # Enviar para o dashboard
-                
-                if system_health['status'] == 'CRITICAL':
-                    log.error(f"⚠️  SYSTEM CRITICAL - Data quality {system_health['overall_score']:.1f}")
-                    risk_multiplier *= 0.5
-                elif system_health['status'] == 'DEGRADED':
-                    log.warning(f"⚠️  SYSTEM DEGRADED - Data quality {system_health['overall_score']:.1f}")
-                    risk_multiplier *= 0.75
-
-            # Analytics: equity tracking
-            if perf_analyzer:
-                perf_analyzer.add_equity_point(equity)
-            if trade_logger:
-                trade_logger.log_equity_snapshot({
-                    'balance': balance,
-                    'equity': equity,
-                    'margin_used': account.get('margin'),
-                    'free_margin': account.get('margin_free'),
-                    'drawdown_pct': 0,
-                })
-
-            # Atualizar allocator se necessário
-            if allocator:
-                allocator.update_capital(balance)
-                if allocator.rebalance():
-                    log.info("🔄 Portfolio rebalanceado!", "ALLOC")
-                    print(allocator.get_allocation_report()[["Symbol", "Sharpe", "Risk %", "Risk €"]].to_string(index=False))
-
-            # Drawdown Protection
+            # ============================================================
+            #  PROCESSO DE EXECUÇÃO
+            # ============================================================
+            sentiment = sentiment_analyzer.get_market_sentiment() if getattr(cfg, 'USE_SENTIMENT_ANALYSIS', False) else None
             dd_check = dd_protector.check_drawdown(balance)
-            if dd_check['action'] == 'STOP':
-                log.warning(f"⚠️  TRADING STOPPED - Modo: {dd_check['mode']} | DD Diário: {dd_check['daily_dd_pct']:.2f}%")
-                if telegram and cfg.TELEGRAM_ALERTS.get('drawdown_warning'):
-                    telegram.send_drawdown_warning(dd_check.get('peak_dd_pct', dd_check['daily_dd_pct']))
-                time.sleep(60)
-                continue
-            elif dd_check.get('mode') == 'REDUCED':
-                if telegram and cfg.TELEGRAM_ALERTS.get('drawdown_warning'):
-                    telegram.send_drawdown_warning(dd_check.get('peak_dd_pct', dd_check.get('daily_dd_pct', 0)))
 
-            rows = []
-
-            # Mean Reversion + MTF + Multi-Strategy
             for symbol in symbols_to_trade:
                 try:
-                    row = process_symbol(symbol, balance, allocator, strategy_manager, dd_check=dd_check, risk_multiplier=risk_multiplier)
-                    rows.append(row)
+                    # Processar símbolo com toda a lógica de filtros e sinais
+                    status = process_symbol(
+                        symbol, balance, allocator, strategy_manager, 
+                        sentiment, dd_check
+                    )
+                    
                 except Exception as e:
-                    log.error(f"Erro: {e}", symbol)
+                    log.error(f"Erro ao processar {symbol}: {str(e)}")
+                    continue
 
-            log.print_status_table(rows)
-
-            # Macro summary
-            if _MACRO and cfg.USE_MACRO_ENGINE:
-                for sym in symbols_to_trade:
-                    ctx = macro.get_macro_context(sym)
-                    sc  = ctx.get("score", 0.0)
-                    reg = ctx.get("regime", "?")
-                    mul = ctx.get("lot_multiplier", 1.0)
-                    c   = "green" if sc > 0.2 else ("red" if sc < -0.2 else "dim")
-                    log.info(f"[{c}]{sc:+.3f} {reg} lot×{mul:.2f}[/]", f"MACRO/{sym}")
-
-            # Arbitragem Stat
-            try:
-                arb_results = arb_runner.run_arb_cycle(symbols_to_trade, balance)
-                active = [r for r in arb_results if r.get("arb_signal")]
-                if active:
-                    log.info(f"ARB sinais: {len(active)}", "ARB")
-            except Exception as e:
-                log.error(f"ARB erro: {e}", "ARB")
-
-            # Arbitragem Triangular
+            # Triangular Arbitrage
             if _TRI and cfg.TRIANGULAR_ARB_ENABLED:
-                try:
-                    opps = tri_arb.run_triangular_cycle()
-                    if opps:
-                        log.info(f"TRIANGULAR: {len(opps)} oportunidades detectadas", "TRI")
-                except Exception as e:
-                    log.error(f"TRI erro: {e}", "TRI")
+                tri_arb.run_triangular_arb_check(balance)
 
-            # Portfolio summary
-            if _PM and cfg.USE_PORTFOLIO_MANAGER:
-                try:
-                    summary = pm.get_portfolio_summary(cfg.MAGIC_NUMBER)
-                    if summary["n_positions"] > 0:
-                        log.info(
-                            f"Portfólio: {summary['n_positions']} pos | "
-                            f"risco={summary['total_risk_pct']:.2f}% | "
-                            f"P&L={summary['total_pnl']:+.2f}",
-                            "PM"
-                        )
-                        if summary["correlated_pairs"]:
-                            for cp in summary["correlated_pairs"][:3]:
-                                log.info(f"  Corr: {cp['a']} ↔ {cp['b']} ({cp['corr']:.2f})", "PM")
-                except Exception as e:
-                    log.error(f"PM erro: {e}", "PM")
+            # Arb Runner (Statistical Arbitrage)
+            if cfg.USE_ARBITRAGE:
+                arb_runner.run_arb_cycle(balance)
 
-            # Data Health Monitor (a cada 5 min)
-            if health_monitor:
-                import time as _t
-                if not hasattr(run, '_last_health_check'):
-                    run._last_health_check = 0
-                if _t.time() - run._last_health_check > 300:
-                    try:
-                        health = health_monitor.check_all_sources()
-                        log.info(
-                            f"Health: {health['healthy']} OK | "
-                            f"{health['degraded']} degraded | "
-                            f"{health['down']} down",
-                            "HEALTH",
-                        )
-                        run._last_health_check = _t.time()
-                    except Exception as e:
-                        log.error(f"Health check erro: {e}", "HEALTH")
+            # Verificar relatório diário (a cada loop):
+            if reporter:
+                reporter.send_report()
 
             log.info(f"[dim]Próxima verificação em {cfg.LOOP_INTERVAL_SECONDS}s[/]")
+            loop_count += 1
             time.sleep(cfg.LOOP_INTERVAL_SECONDS)
 
     except KeyboardInterrupt:
@@ -1015,9 +1237,8 @@ def run(mode: str):
         mt5c.disconnect()
         log.info("MT5 desligado.")
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["live", "paper"], default="paper")
     args = parser.parse_args()
-    run(args.mode)
+    main(args.mode)

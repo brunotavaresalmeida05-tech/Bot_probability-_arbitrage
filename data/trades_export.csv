@@ -1,0 +1,1 @@
+id,timestamp,symbol,strategy,direction,lot_size,entry_price,exit_price,stop_loss,take_profit,pnl,pnl_pct,commission,duration_minutes,exit_reason,notes,profit

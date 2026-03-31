@@ -127,6 +127,26 @@ class Breakout:
         
         return grouped
     
+    def detect_inside_bar(self, df: pd.DataFrame) -> Optional[Dict]:
+        """
+        Inside bar: high/low dentro da barra anterior
+        Breakout: entrada na quebra
+        """
+        if len(df) < 2: return None
+        prev_high = df['high'].iloc[-2]
+        prev_low = df['low'].iloc[-2]
+        curr_high = df['high'].iloc[-1]
+        curr_low = df['low'].iloc[-1]
+        
+        if curr_high < prev_high and curr_low > prev_low:
+            # Inside bar detectado
+            return {
+                'trigger_buy': prev_high,
+                'trigger_sell': prev_low,
+                'stop_distance': prev_high - prev_low
+            }
+        return None
+
     def get_signal(self, df: pd.DataFrame, symbol: str) -> Dict:
         """
         Gera sinal de breakout.
