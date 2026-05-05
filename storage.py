@@ -1,12 +1,11 @@
 """
-storage.py — Minimal GCS helper for AlphaSystem.
-Single entry point for state.json read/write.
+storage.py — GCS helpers for AlphaSystem.
+Single entry point for state.json (JSON) and events.csv (CSV).
 Bot uses gcsfs | Dashboard uses st_files_connection.
 """
 import json
 import os
 
-# Config (set in .env or Streamlit secrets)
 GCS_BUCKET = os.getenv("GCS_BUCKET", "your-bucket-name")
 GCS_PREFIX = os.getenv("GCS_PREFIX", "alphasystem")
 
@@ -14,7 +13,6 @@ GCS_PREFIX = os.getenv("GCS_PREFIX", "alphasystem")
 # ── BOT HELPERS (gcsfs) ──────────────────────────
 
 def get_fs():
-    """Return gcsfs filesystem for bot."""
     import gcsfs
     return gcsfs.GCSFileSystem(token="cloud")
 
@@ -40,6 +38,31 @@ def load_state(fs=None) -> dict:
         return {"equity": 0, "balance": 0, "positions": [], "last_signal": "none", "updated_at": ""}
 
 
+def save_events(df, fs=None):
+    """Save DataFrame as CSV to GCS (events.csv)."""
+    if fs is None:
+        fs = get_fs()
+    import io
+    output = io.StringIO()
+    df.to_csv(output, index=False)
+    path = f"{GCS_BUCKET}/{GCS_PREFIX}/events.csv"
+    with fs.open(path, "w") as f:
+        f.write(output.getvalue())
+
+
+def load_events(fs=None):
+    """Load events.csv from GCS. Returns empty DataFrame on error."""
+    if fs is None:
+        fs = get_fs()
+    import pandas as pd
+    path = f"{GCS_BUCKET}/{GCS_PREFIX}/events.csv"
+    try:
+        with fs.open(path, "r") as f:
+            return pd.read_csv(f)
+    except:
+        return pd.DataFrame()
+
+
 # ── DASHBOARD HELPERS (st_files_connection) ──────────
 
 def get_conn():
@@ -53,3 +76,9 @@ def dash_load_state(conn):
     """Load state.json in Streamlit (cached)."""
     path = f"{GCS_BUCKET}/{GCS_PREFIX}/state.json"
     return conn.read(path, input_format="json", ttl=30)
+
+
+def dash_load_events(conn):
+    """Load events.csv in Streamlit (cached)."""
+    path = f"{GCS_BUCKET}/{GCS_PREFIX}/events.csv"
+    return conn.read(path, ttl=30)
