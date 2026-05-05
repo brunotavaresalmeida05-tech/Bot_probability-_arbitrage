@@ -13,7 +13,6 @@ import pandas as pd
 import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 from dotenv import load_dotenv
-from st_files_connection import FilesConnection
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -24,7 +23,7 @@ load_dotenv()
 
 st.set_page_config(
     page_title="AlphaSystem Dashboard",
-    page_icon="📊",
+    page_icon="📈",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -42,6 +41,7 @@ refresh_count = st_autorefresh(interval=REFRESH_SECONDS * 1000, limit=None, key=
 st.write(f"Refreshes: {refresh_count}")
 
 # ── GCS Connection ──────────────────────────────────
+from st_files_connection import FilesConnection
 conn = st.connection("gcs", type=FilesConnection)
 BUCKET = st.secrets.get("GCS_BUCKET", os.getenv("GCS_BUCKET", "your-bucket-name"))
 PREFIX = st.secrets.get("GCS_PREFIX", os.getenv("GCS_PREFIX", "alphasystem"))

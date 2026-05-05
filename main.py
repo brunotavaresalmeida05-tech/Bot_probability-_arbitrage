@@ -2,7 +2,7 @@
 Main loop — AlphaSystem V8
 Cycle: load symbols → fetch candles → compute indicators →
 update context → orchestrate (regime + strategy + risk + execution) → log
-Saves state, events, trades to Google Cloud Storage.
+Saves state, events, trades to Google Cloud Storage via storage.py.
 """
 
 import time
@@ -11,9 +11,6 @@ from datetime import datetime
 from pathlib import Path
 import json
 import io
-
-# GCS
-import gcsfs
 import pandas as pd
 
 # GCS config — reads from .env or defaults
@@ -21,6 +18,9 @@ from dotenv import load_dotenv
 load_dotenv()
 GCS_BUCKET = os.getenv("GCS_BUCKET", "your-bucket-name")
 GCS_PREFIX = os.getenv("GCS_PREFIX", "alphasystem")
+
+# Reusable GCS helpers
+from storage import get_gcs_fs, save_json, load_json, save_csv, load_csv
 
 # Core modules
 from core.context import MarketContext
@@ -42,56 +42,6 @@ import watchlist as watchlist
 # Logging and snapshots
 from core.logging import log
 from core.snapshot import save_cycle_log
-
-
-# ── GCS Helpers ──────────────────────────────────────
-
-def get_gcs_fs():
-    """Return a gcsfs filesystem using default auth."""
-    return gcsfs.GCSFileSystem(token="cloud")
-
-
-def save_state(fs, state: dict):
-    """Save bot state to GCS (state.json)."""
-    full_path = f"{GCS_BUCKET}/{GCS_PREFIX}/state.json"
-    with fs.open(full_path, "w") as f:
-        json.dump(state, f, indent=2, default=str)
-
-
-def load_state(fs) -> dict:
-    """Load bot state from GCS (state.json)."""
-    full_path = f"{GCS_BUCKET}/{GCS_PREFIX}/state.json"
-    try:
-        with fs.open(full_path, "r") as f:
-            return json.load(f)
-    except:
-        return {"equity": 0, "positions": [], "last_signal": "none"}
-
-
-def append_events(fs, entry: dict):
-    """Append event to events.csv in GCS."""
-    import csv
-    from io import StringIO
-
-    full_path = f"{GCS_BUCKET}/{GCS_PREFIX}/events.csv"
-
-    try:
-        with fs.open(full_path, "r") as f:
-            existing = f.read()
-        reader = csv.DictReader(StringIO(existing))
-        rows = list(reader)
-    except:
-        rows = []
-
-    rows.append(entry)
-
-    output = StringIO()
-    writer = csv.DictWriter(output, fieldnames=["time", "symbol", "regime", "signal", "retcode"])
-    writer.writeheader()
-    writer.writerows(rows)
-
-    with fs.open(full_path, "w") as f:
-        f.write(output.getvalue())
 
 
 def append_history(fs, entry: dict):
@@ -138,7 +88,7 @@ def run_cycle(symbols: list, open_positions: dict, fs=None):
         fs = get_gcs_fs()
 
     results = []
-    state = load_state(fs)
+    state = load_json(fs, "state.json")
 
     for symbol in symbols:
         print(f"\n[{datetime.now()}] Processing {symbol}...")
@@ -186,8 +136,9 @@ def run_cycle(symbols: list, open_positions: dict, fs=None):
         })
 
         # 8. Save to GCS
-        save_snapshot(fs, symbol, {
+        save_json(fs, f"snapshot_{symbol}.json", {
             "symbol": symbol,
+            "timestamp": datetime.now().isoformat(),
             "result": result,
             "account": account_state,
             "open_positions_count": open_pos_count,
@@ -199,22 +150,33 @@ def run_cycle(symbols: list, open_positions: dict, fs=None):
 
         # Append to history
         now_iso = datetime.now().isoformat()
-        append_history(fs, {
+        history_entry = {
             "time": now_iso,
             "symbol": symbol,
             "equity": account_state.get("equity"),
             "signal": signal_obj.side if signal_obj else None,
-        })
+        }
+        history = load_json(fs, "history.json")
+        if not isinstance(history, list):
+            history = []
+        history.append(history_entry)
+        save_json(fs, "history.json", history)
 
         # Append to events
         execution_obj = result.get("execution")
-        append_events(fs, {
+        events_entry = {
             "time": now_iso,
             "symbol": symbol,
             "regime": regime_obj.regime if regime_obj else None,
             "signal": signal_obj.side if signal_obj else None,
             "retcode": execution_obj.retcode if execution_obj else None,
-        })
+        }
+        events_df = load_csv(fs, "events.csv")
+        if events_df.empty:
+            events_df = pd.DataFrame([events_entry])
+        else:
+            events_df = pd.concat([events_df, pd.DataFrame([events_entry])], ignore_index=True)
+        save_csv(fs, "events.csv", events_df)
 
         # Keep cycle log for backward compatibility
         save_cycle_log({
@@ -233,7 +195,7 @@ def run_cycle(symbols: list, open_positions: dict, fs=None):
         print(f"  -> Status: {result.get('status')}")
 
     # Save final state
-    save_state(fs, state)
+    save_json(fs, "state.json", state)
     return results
 
 
