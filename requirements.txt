@@ -23,3 +23,17 @@ sqlalchemy==2.0.20
 # Utilities
 python-dotenv==1.0.0
 pyyaml==6.0.1
+
+# Google Cloud Storage
+gcsfs==2024.3.0
+streamlit-files-connection==0.1.0
+streamlit-autorefresh
+
+# Messaging
+pyzmq>=27.0
+
+# Desktop terminal
+customtkinter>=5.2
+
+# Reports
+openpyxl>=3.1
