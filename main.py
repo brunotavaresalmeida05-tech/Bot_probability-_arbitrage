@@ -13,15 +13,12 @@ import json
 import io
 import pandas as pd
 
-# GCS config — reads from .env or defaults
+# GCS config
 from dotenv import load_dotenv
 load_dotenv()
 
 # Reusable GCS helpers
-from storage import (
-    get_gcs_fs, save_json, load_json,
-    save_csv, load_csv
-)
+from storage import get_fs, save_json, load_json, save_csv, load_csv
 
 # Core modules
 from core.context import MarketContext
@@ -61,7 +58,7 @@ def run_cycle(symbols: list, open_positions: dict, fs=None):
     context, orchestrator = build_system()
 
     if fs is None:
-        fs = get_gcs_fs()
+        fs = get_fs()
 
     results = []
     state = load_json("state.json", fs)
