@@ -1,17 +1,20 @@
 """
 storage.py — Minimal GCS helper for AlphaSystem.
-Single purpose: read/write state.json to GCS.
+Single entry point for state.json read/write.
+Bot uses gcsfs | Dashboard uses st_files_connection.
 """
 import json
 import os
 
+# Config (set in .env or Streamlit secrets)
 GCS_BUCKET = os.getenv("GCS_BUCKET", "your-bucket-name")
 GCS_PREFIX = os.getenv("GCS_PREFIX", "alphasystem")
 
 
-# ── BOT (gcsfs) ──────────────────────────────────
+# ── BOT HELPERS (gcsfs) ──────────────────────────
 
 def get_fs():
+    """Return gcsfs filesystem for bot."""
     import gcsfs
     return gcsfs.GCSFileSystem(token="cloud")
 
@@ -26,7 +29,7 @@ def save_state(obj: dict, fs=None):
 
 
 def load_state(fs=None) -> dict:
-    """Load state.json from GCS. Returns minimal schema on error."""
+    """Load state.json from GCS. Returns default schema on error."""
     if fs is None:
         fs = get_fs()
     path = f"{GCS_BUCKET}/{GCS_PREFIX}/state.json"
@@ -34,10 +37,10 @@ def load_state(fs=None) -> dict:
         with fs.open(path, "r") as f:
             return json.load(f)
     except:
-        return {"equity": 0, "positions": [], "last_signal": "none", "updated_at": ""}
+        return {"equity": 0, "balance": 0, "positions": [], "last_signal": "none", "updated_at": ""}
 
 
-# ── DASHBOARD (st_files_connection) ────────────────
+# ── DASHBOARD HELPERS (st_files_connection) ──────────
 
 def get_conn():
     """Return Streamlit FilesConnection (call only inside Streamlit)."""
