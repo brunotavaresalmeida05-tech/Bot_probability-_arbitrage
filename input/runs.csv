@@ -1,0 +1,7 @@
+run_id,strategy,version,symbol,timeframe,start_ts,end_ts,equity_final,max_dd,sharpe,win_rate,total_trades,profit_factor
+TrendFollowing_v1.0_EURUSD_0,TrendFollowing,v1.0,EURUSD,M5,2026-01-01T00:00:00,2026-01-30T23:00:00,11366.05,2.7,7.09,0.53,89,2.11
+TrendFollowing_v2.0_EURUSD_1,TrendFollowing,v2.0,EURUSD,M5,2026-01-01T00:00:00,2026-01-30T23:00:00,16166.74,0.95,24.83,0.57,135,2.18
+TrendFollowing_v2.1_EURUSD_2,TrendFollowing,v2.1,EURUSD,M5,2026-01-01T00:00:00,2026-01-30T23:00:00,14843.19,1.6,22.44,0.64,95,1.3
+MeanReversion_v1.0_GBPUSD_3,MeanReversion,v1.0,GBPUSD,M15,2026-01-01T00:00:00,2026-01-30T23:00:00,11468.78,2.9,7.64,0.51,66,1.47
+MeanReversion_v2.0_GBPUSD_4,MeanReversion,v2.0,GBPUSD,M15,2026-01-01T00:00:00,2026-01-30T23:00:00,13064.51,2.26,14.82,0.58,118,1.5
+Breakout_v1.0_EURUSD_5,Breakout,v1.0,EURUSD,M5,2026-01-01T00:00:00,2026-01-30T23:00:00,10363.63,5.37,2.02,0.53,90,1.36

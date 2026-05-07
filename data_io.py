@@ -14,12 +14,12 @@ def load_yaml(path: str, default):
         return yaml.safe_load(f) or default
 
 
-def load_presets(path: str = "presets.yaml") -> dict:
+def load_presets(path: str = "input/presets.yaml") -> dict:
     data = load_yaml(path, {})
     return data if isinstance(data, dict) else {}
 
 
-def load_history(path: str = "data/historical_rankings.csv") -> pd.DataFrame:
+def load_history(path: str = "output/historical_rankings.csv") -> pd.DataFrame:
     p = Path(path)
     if not p.exists():
         return pd.DataFrame()
@@ -29,7 +29,7 @@ def load_history(path: str = "data/historical_rankings.csv") -> pd.DataFrame:
     return df
 
 
-def load_runs(path: str = "data/session_runs.csv") -> pd.DataFrame:
+def load_runs(path: str = "input/runs.csv") -> pd.DataFrame:
     df = pd.read_csv(path)
     for col in ["start_ts", "end_ts"]:
         if col in df.columns:
@@ -37,7 +37,7 @@ def load_runs(path: str = "data/session_runs.csv") -> pd.DataFrame:
     return df
 
 
-def load_curves(path: str = "data/session_curves.csv") -> pd.DataFrame:
+def load_curves(path: str = "input/equity_curves.csv") -> pd.DataFrame:
     df = pd.read_csv(path)
     if "ts" in df.columns:
         df["ts"] = pd.to_datetime(df["ts"], errors="coerce")

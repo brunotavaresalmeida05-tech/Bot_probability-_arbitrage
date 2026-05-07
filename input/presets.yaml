@@ -1,0 +1,26 @@
+conservador:
+  selected_metric: max_dd_mean
+  selected_group: version
+  dist_type: box
+  sort_ascending: true
+  top_n: 5
+  only_top2: true
+  selected_groups: []
+
+agressivo:
+  selected_metric: score_mean
+  selected_group: version
+  dist_type: violin
+  sort_ascending: false
+  top_n: 10
+  only_top2: false
+  selected_groups: []
+
+eurusd_only:
+  selected_metric: score_mean
+  selected_group: symbol
+  dist_type: histogram
+  sort_ascending: false
+  top_n: 5
+  only_top2: false
+  selected_groups: ["EURUSD"]

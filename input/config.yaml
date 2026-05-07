@@ -1,0 +1,15 @@
+display:
+  top_n: 2
+  normalize_equity: true
+
+ranking_weights:
+  sharpe: 0.5
+  win_rate: 0.2
+  equity_final: 0.2
+  max_dd: 0.1
+
+filters:
+  strategies: []
+  symbols: []
+  timeframes: []
+  versions: []

@@ -14,11 +14,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-PRESETS_PATH = "presets.yaml"
-HISTORY_PATH = "data/historical_rankings.csv"
-RUNS_CSV = "data/session_runs.csv"
-CURVES_CSV = "data/session_curves.csv"
-CONFIG_PATH = "config/ranking.yaml"
+PRESETS_PATH = "input/presets.yaml"
+HISTORY_PATH = "output/historical_rankings.csv"
+RUNS_CSV = "input/runs.csv"
+CURVES_CSV = "input/equity_curves.csv"
+CONFIG_PATH = "input/config.yaml"
 
 DEFAULTS = {
     "selected_metric": "score_mean",

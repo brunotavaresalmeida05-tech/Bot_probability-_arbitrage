@@ -70,9 +70,9 @@ def prepare_curves(curves: pd.DataFrame, config: dict) -> pd.DataFrame:
 
 
 def compare_sessions(
-    runs_csv: str = "data/session_runs.csv",
-    curves_csv: str = "data/session_curves.csv",
-    config_path: str = "config/ranking.yaml",
+    runs_csv: str = "input/runs.csv",
+    curves_csv: str = "input/equity_curves.csv",
+    config_path: str = "input/config.yaml",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     config = load_yaml(config_path, {})
     runs = load_runs(runs_csv)
@@ -98,7 +98,7 @@ def build_comparison_figures(summary: pd.DataFrame, curves: pd.DataFrame) -> tup
     return eq_fig, dd_fig
 
 
-def save_historical_rankings(summary: pd.DataFrame, path: str = "data/historical_rankings.csv") -> None:
+def save_historical_rankings(summary: pd.DataFrame, path: str = "output/historical_rankings.csv") -> None:
     if summary.empty:
         return
     out = summary.copy()
