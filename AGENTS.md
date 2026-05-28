@@ -131,10 +131,26 @@ projeto/
 
 > Descreve o desenho do sistema. Actualiza ao evoluir.
 
-- **Padrão arquitectural:** [MVC | Clean Architecture | Hexagonal | Monolith | Microservices]
-- **Comunicação:** [REST | GraphQL | gRPC | WebSockets]
-- **Autenticação:** [JWT stateless | Sessions | OAuth2 flow]
-- **Deploy:** [descrição do pipeline]
+```
+ARQUITECTURA HÍBRIDA
+====================
+
+Engine Python (existente)
+    ↓ escreve
+state.json / JSONL (persistência)
+    ↑ lê
+FastAPI (novo - layer de API)
+    ↓ WebSocket + REST
+React + TS (novo - frontend)
+```
+
+- **Padrão arquitectural:** Hybrid Microservices (State-driven via files)
+- **Comunicação:** 
+  - Python Engine → FileSystem (JSON/JSONL)
+  - FastAPI ↔ FileSystem (reads state, polls changes)
+  - FastAPI ↔ React (REST API + WebSockets em tempo real)
+- **Autenticação:** JWT stateless (FastAPI middleware)
+- **Deploy:** Docker Compose (Python Engine + FastAPI + React)
 
 ---
 
@@ -158,11 +174,14 @@ ALWAYS separar configuração do código (12-factor app)
 
 > Lista os padrões adoptados para manter consistência.
 
-- [ ] Repository Pattern (acesso a dados)
-- [ ] Service Layer (lógica de negócio)
-- [ ] DTO / Schema validation (entrada/saída)
-- [ ] Error boundary (tratamento de erros)
+- [x] State-Driven Architecture (FileSystem como fonte única de verdade)
+- [x] Repository Pattern (acesso a dados via JSON/JSONL)
+- [x] Service Layer (FastAPI services encapsulam lógica)
+- [x] DTO / Schema validation (Pydantic models em FastAPI)
+- [x] Error boundary (FastAPI exception handlers)
+- [x] Real-time sync (WebSockets para updates em tempo real)
 - [ ] Feature flags (activar funcionalidades gradualmente)
+- [ ] CQRS Pattern (separar reads/writes se necessário)
 
 ---
 
