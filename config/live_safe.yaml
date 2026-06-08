@@ -1,0 +1,46 @@
+mode: live_safe
+
+risk:
+  max_positions: 1
+  risk_per_trade_pct: 0.25
+  daily_loss_limit_pct: 1.0
+  weekly_loss_limit_pct: 2.5
+  max_spread_pct: 0.02
+  allow_new_trades: true
+  kill_switch: false
+
+filters:
+  use_spread_filter: true
+  use_news_filter: true
+  use_session_filter: true
+  news_blackout_before_min: 15
+  news_blackout_after_min: 15
+  session_allowed:
+    - london
+    - new_york
+
+execution:
+  allow_micro_lots: true
+  default_lot: 0.01
+  min_lot: 0.01
+  sl_atr_multiplier: 2.0
+  tp_atr_multiplier: 3.0
+  max_slippage_pips: 1.5
+
+performance:
+  enable_incremental_sync: true
+  lookback_hours: 24
+  include_commission: true
+  include_swap: true
+
+runtime:
+  cycle_seconds: 5
+  graceful_shutdown: true
+  write_state_on_every_cycle: true
+  write_history_append_only: true
+
+dashboard:
+  websocket_enabled: true
+  broadcast_interval_ms: 500
+  show_performance: true
+  show_risk_status: true

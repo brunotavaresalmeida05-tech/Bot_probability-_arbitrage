@@ -1,0 +1,63 @@
+# config/scalping.yaml — Scalping Module Configuration
+# Activar/desactivar sem mexer no trend engine.
+# enabled: false mantém o módulo carregado mas silencioso.
+
+enabled: false   # activar apenas após validação do núcleo (7 dias OK)
+
+timeframes:
+  trigger:  M1    # gatilho
+  confirm:  M5    # confirmação
+  bias:     M15   # filtro de direcção local
+  context:  H1    # contexto macro (evitar scalps contra tendência forte)
+
+symbols:
+  - EURUSD
+  - GBPUSD
+  - USDJPY
+  - Usa500
+  - UsaTec
+  - Ger40
+  - GOLD
+
+sessions:
+  london:           true    # 08:00–17:00 UTC
+  new_york:         true    # 13:00–22:00 UTC
+  london_ny_overlap: true   # 13:00–17:00 UTC (melhor liquidez)
+  asia:             false   # spread alto, evitar
+
+filters:
+  max_spread_pct:
+    fx:          0.015   # mais apertado que o core (0.020)
+    indices:     0.060
+    commodities: 0.200
+    crypto:      0.400
+  min_atr_m5_pct:     0.08   # volatilidade mínima no M5 (% do preço)
+  news_block_minutes: 15     # blackout antes/depois de notícia alto impacto
+  max_h1_adx_opposing: 35    # não scalpar se H1 tendência oposta > 35 ADX
+
+setups:
+  trend_scalp:
+    enabled: true
+    ema_trigger_fast: 5     # EMA rápida M1
+    ema_trigger_slow: 13    # EMA lenta M1
+    ema_bias_fast:    8     # EMA rápida M5 (bias)
+    ema_bias_slow:    21    # EMA lenta M5 (bias)
+  breakout_scalp:
+    enabled: true
+    lookback_bars:    10    # micro-range em M1
+    body_ratio_min:   0.50  # corpo do candle vs range total
+
+exits:
+  stop_atr_mult:     0.8   # SL = entry ± atr × 0.8
+  tp_atr_mult:       0.9   # TP = entry ± atr × 0.9
+  breakeven_at_r:    0.6   # mover SL para entry quando preço atinge 0.6 × TP
+  time_stop_bars_m1: 6     # fechar se não andar em 6 velas M1
+  time_stop_be_dist: 0.3   # fechar se preço < 0.3 × ATR da entrada após time_stop
+
+risk:
+  risk_per_trade_pct:      0.0025   # 0.25% (metade do core)
+  max_trades_per_session:  5
+  max_consecutive_losses:  3
+  daily_loss_cap_pct:      0.010    # 1% — cap próprio do scalper
+  cooldown_after_loss_secs: 120     # 2 min cooldown após perda
+  max_open_scalps:         2        # máx. posições simultâneas de scalping

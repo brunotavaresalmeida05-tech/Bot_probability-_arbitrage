@@ -1,0 +1,308 @@
+# config/central_bank_map.yaml
+# Central bank policy map: events, affected assets, blackouts, multipliers.
+# Used by PolicyShockLayer and InterestRateTransmissionEngine.
+
+version: 1
+
+banks:
+
+  fed:
+    name: Federal Reserve
+    currency: USD
+    priority_level: 1          # highest impact globally
+
+    regimes:
+      inflation_tight:
+        description: "High inflation, hawkish guidance, rate hikes"
+        events: [fomc, cpi_us, pce, nfp_strong, fed_speakers_hawkish]
+        expected_correlation:
+          dxy: positive
+          yields: positive
+          nasdaq: negative
+          sp500: negative
+          gold: mixed
+          btc: negative
+          eur_usd: negative
+          aud_usd: negative
+        bot_action: block_near_event_reduce_far
+        risk_multiplier: 0.0_to_0.5
+
+      risk_off:
+        description: "Financial stress, VIX spike, recession fears"
+        events: [financial_crisis, vix_spike, credit_event]
+        expected_correlation:
+          dxy: positive
+          jpy: positive
+          chf: positive
+          equities: negative
+          commodities: negative
+          crypto: negative
+        bot_action: cut_growth_crypto_exposure
+        risk_multiplier: 0.3_to_0.6
+
+      easing:
+        description: "Dovish pivot, rate cuts, QE"
+        events: [fomc_cut, fed_dovish_guidance, qe_announcement]
+        expected_correlation:
+          dxy: negative
+          yields: negative
+          equities: positive
+          btc: positive
+          gold: positive
+          eur_usd: positive
+        bot_action: confirm_risk_on_signals
+        risk_multiplier: 0.75_to_1.0
+
+    affected_assets:
+      primary:   [EURUSD, USDJPY, GBPUSD, AUDUSD, NZDUSD, USDCAD, USDCHF]
+      indices:   [Usa500, UsaTec, Ger40, UK100]
+      commodities: [GOLD, SILVER, LCrude, Brent]
+      crypto:    [BTCUSD, ETHUSD]
+
+    blackout:
+      before_minutes: 30
+      after_minutes:  30
+      high_impact_before: 60    # for FOMC decision days
+      high_impact_after:  45
+
+  ecb:
+    name: European Central Bank
+    currency: EUR
+    priority_level: 2
+
+    regimes:
+      tightening:
+        events: [ecb_rate_decision, cpi_eu, pmi_eu, ecb_speakers_hawkish]
+        expected_correlation:
+          eur_usd: volatile_to_positive
+          ger40: negative_to_volatile
+          eurjpy: positive_then_volatile
+        bot_action: reduce_before_event_wait_reaction
+        risk_multiplier: 0.3_to_0.6
+
+      easing:
+        events: [ecb_rate_cut, qe_ecb, ecb_dovish]
+        expected_correlation:
+          eur_usd: negative
+          ger40: positive
+          eurjpy: negative
+        bot_action: confirm_if_aligned
+        risk_multiplier: 0.75_to_1.0
+
+    affected_assets:
+      primary:   [EURUSD, EURJPY]
+      indices:   [Ger40, Ger40Jun26]
+      secondary: [GBPUSD, UK100]
+
+    blackout:
+      before_minutes: 30
+      after_minutes:  30
+
+  boj:
+    name: Bank of Japan
+    currency: JPY
+    priority_level: 2
+    special_note: "YCC changes and hawkish surprises cause extreme JPY moves"
+
+    regimes:
+      hawkish_surprise:
+        events: [boj_rate_hike, ycc_change, boj_hawkish]
+        expected_correlation:
+          usdjpy: strongly_negative   # JPY surges
+          eurjpy: strongly_negative
+          jp225:  negative            # export sector hurt
+          carry_trades: unwind
+        bot_action: blackout_strong_before_after
+        risk_multiplier: 0.0_to_0.4
+
+      dovish_hold:
+        events: [boj_hold, boj_dovish]
+        expected_correlation:
+          usdjpy: positive
+          jp225:  positive
+        bot_action: reduce_size_conservative
+        risk_multiplier: 0.5_to_0.8
+
+    affected_assets:
+      primary:   [USDJPY, EURJPY]
+      indices:   [Jp225, Jp225Jun26]
+      secondary: [AUDUSD, GBPUSD]    # carry trade pairs
+
+    blackout:
+      before_minutes: 45
+      after_minutes:  60    # BoJ moves can persist for hours
+
+  boe:
+    name: Bank of England
+    currency: GBP
+    priority_level: 3
+
+    regimes:
+      tightening:
+        events: [boe_rate_hike, cpi_uk, boe_hawkish]
+        expected_correlation:
+          gbp_usd: volatile
+          uk100:   negative
+        bot_action: reduce_near_event
+        risk_multiplier: 0.3_to_0.6
+
+      easing:
+        events: [boe_rate_cut, boe_dovish]
+        expected_correlation:
+          gbp_usd: negative
+          uk100:   positive
+        bot_action: confirm_if_aligned
+        risk_multiplier: 0.7_to_1.0
+
+    affected_assets:
+      primary:   [GBPUSD]
+      indices:   [UK100, UK100Jun26]
+      secondary: [EURUSD]
+
+    blackout:
+      before_minutes: 30
+      after_minutes:  30
+
+  boc:
+    name: Bank of Canada
+    currency: CAD
+    priority_level: 3
+
+    regimes:
+      tightening:
+        events: [boc_rate_hike, cpi_ca]
+        expected_correlation:
+          usdcad: negative    # CAD strengthens
+          oil:    confirming
+        bot_action: confirm_with_oil_data
+        risk_multiplier: 0.5_to_1.0
+
+      easing:
+        events: [boc_rate_cut, boc_dovish]
+        expected_correlation:
+          usdcad: positive
+        bot_action: reduce_if_oil_not_confirming
+        risk_multiplier: 0.5_to_0.8
+
+    affected_assets:
+      primary:   [USDCAD]
+      secondary: [LCrude, Brent]
+
+    blackout:
+      before_minutes: 25
+      after_minutes:  25
+
+  rba:
+    name: Reserve Bank of Australia
+    currency: AUD
+    priority_level: 3
+
+    regimes:
+      any:
+        events: [rba_rate_decision, cpi_au, employment_au]
+        expected_correlation:
+          aud_usd: volatile
+          gold:    confirming_for_aud
+        bot_action: confirm_with_china_commodities
+        risk_multiplier: 0.5_to_1.0
+
+    affected_assets:
+      primary:   [AUDUSD]
+      secondary: [GOLD, SILVER]
+
+    blackout:
+      before_minutes: 25
+      after_minutes:  25
+
+  rbnz:
+    name: Reserve Bank of New Zealand
+    currency: NZD
+    priority_level: 4
+
+    regimes:
+      any:
+        events: [rbnz_rate_decision, cpi_nz]
+        bot_action: reduce_size_operate_liquid_context_only
+        risk_multiplier: 0.5_to_0.9
+
+    affected_assets:
+      primary:   [NZDUSD]
+      secondary: [AUDUSD]
+
+    blackout:
+      before_minutes: 25
+      after_minutes:  25
+
+  snb:
+    name: Swiss National Bank
+    currency: CHF
+    priority_level: 3
+    special_note: "SNB interventions are rare but extreme"
+
+    regimes:
+      intervention_risk:
+        events: [snb_rate_decision, snb_fx_intervention]
+        expected_correlation:
+          usdchf: strongly_volatile
+          eurchf: strongly_volatile
+          gold:   positive    # CHF and gold both safe havens
+        bot_action: block_if_intervention_expected
+        risk_multiplier: 0.0_to_0.5
+
+    affected_assets:
+      primary:   [USDCHF]
+      secondary: [GOLD]
+
+    blackout:
+      before_minutes: 30
+      after_minutes:  30
+
+  pboc:
+    name: People's Bank of China
+    currency: CNY
+    priority_level: 3
+    special_note: "Indirect effect via commodities, AUD, NZD and EM risk"
+
+    regimes:
+      stimulative:
+        events: [pboc_cut, china_pmi_strong, china_credit_expansion]
+        expected_correlation:
+          aud_usd: positive
+          nzd_usd: positive
+          gold:    positive
+          oil:     positive
+        bot_action: confirm_commodity_and_aud_nzd
+        risk_multiplier: 0.7_to_1.0
+
+      restrictive:
+        events: [pboc_hike, china_pmi_weak, china_credit_contraction]
+        expected_correlation:
+          aud_usd: negative
+          nzd_usd: negative
+          commodities: negative
+        bot_action: reduce_aud_nzd_commodities
+        risk_multiplier: 0.4_to_0.7
+
+    affected_assets:
+      primary:   [AUDUSD, NZDUSD]
+      secondary: [GOLD, SILVER, LCrude, Brent]
+      indices:   [Jp225]
+
+    blackout:
+      before_minutes: 15
+      after_minutes:  20
+
+# ── Priority override rules ─────────────────────────────────────────────────
+# When multiple CBs are active simultaneously:
+priority_rules:
+  - if: [fed_active, ecb_active]
+    winner: fed
+    note: "Fed always overrides ECB for global risk"
+
+  - if: [boj_ycc_change, any_carry_trade]
+    action: blackout_all_jpy_pairs
+    note: "YCC changes affect all carry trades"
+
+  - if: [vix_above_30, any_cb_event]
+    action: reduce_all_50pct
+    note: "Crisis + CB event = double uncertainty"

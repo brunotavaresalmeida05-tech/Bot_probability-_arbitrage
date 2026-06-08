@@ -1,0 +1,81 @@
+# Asset Universe — AlphaSystem V8
+# Simbolos validados contra ActivTrades MT5 conta #6238864 (2026-05-31)
+
+fx_majors:
+  symbols: [EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD]
+  execution_tf: M5
+  context_tf: H1
+  macro_tf: H4
+  session_priority: [london_ny_overlap]
+  max_spread_pct: 0.020   # EURUSD normal ~0.003%, USDCHF off-hours ~0.017% — bloqueia spike
+  adx_threshold: 25
+  score_threshold: 65
+  atr_period: 14
+  ema_periods: [20, 50, 100]
+
+indices_cfd:
+  symbols:
+    - Usa500   # S&P 500  — min_lot 0.5
+    - UsaTec   # Nasdaq   — min_lot 0.2
+    - Ger40    # DAX 40   — min_lot 0.25
+    - UK100    # FTSE 100 — min_lot 0.1
+    - Jp225    # Nikkei   — min_lot 0.05
+  execution_tf: M5
+  context_tf: H1
+  macro_tf: D1
+  session_priority: [us_open, eu_open]
+  max_spread_pct: 0.08    # Usa500 normal ~0.016% — bloqueia spike >5x
+  adx_threshold: 22
+  score_threshold: 65
+  atr_period: 14
+  ema_periods: [20, 50, 100]
+  macro_filters:
+    - condition: dxy_risk_off
+      lot_multiplier: 0.60
+    - condition: yield_inverted
+      symbols_affected: [UsaTec]
+      lot_multiplier: 0.50
+
+commodities:
+  symbols:
+    - GOLD     # Ouro     — min_lot 0.01
+    - SILVER   # Prata    — min_lot 0.01
+    - LCrude   # WTI Light Crude — min_lot 0.01
+    - Brent    # Brent Crude     — min_lot 0.01
+    - NGas     # Nat Gas  — min_lot 0.01  (priority: low)
+  execution_tf: M5
+  context_tf: H4
+  macro_tf: D1
+  session_priority: [new_york]
+  max_spread_pct: 0.80    # GOLD normal ~0.024%, NGas off-hours ~0.75% — bloqueia apenas mercado partido
+  adx_threshold: 20
+  score_threshold: 65
+  atr_period: 14
+  ema_periods: [20, 50, 100]
+
+crypto_cfd:
+  symbols: [BTCUSD, ETHUSD]
+  execution_tf: M5
+  context_tf: H1
+  macro_tf: H4
+  session_priority: [crypto_24h]
+  max_spread_pct: 0.50    # BTC normal ~0.03% — ETH pode chegar a 0.40% em baixa liquidez
+  adx_threshold: 25
+  score_threshold: 70
+  atr_period: 14
+  ema_periods: [20, 50, 100]
+  extra_filters:
+    vix_max: 25
+    require_volume_confirmation: true
+
+risk:
+  risk_per_trade_pct: 1.0
+  max_open_positions: 5
+  max_correlated_exposure: 3
+  min_free_margin_pct: 30
+  score_threshold: 65
+
+execution_filters:
+  news_blackout_minutes: 15
+  max_atr_multiplier: 3.0
+  spread_check_enabled: true

@@ -1,0 +1,13 @@
+ranking_weights:
+  sharpe: 0.5
+  win_rate: 0.2
+  equity_final: 0.2
+  max_dd: 0.1
+
+filters:
+  min_trades: 20
+  min_days: 7
+
+scoring:
+  equity_rank_method: "pct"  # pct | min-max
+  dd_invert: true  # true = lower DD is better

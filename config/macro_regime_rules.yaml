@@ -1,0 +1,225 @@
+# config/macro_regime_rules.yaml
+# Macro regime classification rules, asset behavior, and multipliers.
+# Used by MacroRegimeEngine and MacroCorrelationPolicyEngine.
+
+version: 1
+
+regimes:
+
+  risk_on:
+    definition: "Strong risk appetite — equities rising, DXY weak, VIX low"
+    drivers:
+      - sp500_zscore_positive
+      - dxy_zscore_negative
+      - vix_below_15
+      - btc_momentum_positive
+    expected_asset_behavior:
+      fx:
+        aud_usd: up
+        nzd_usd: up
+        eur_usd: up
+        gbp_usd: up
+        usd_jpy: mixed
+        usd_chf: down
+        usd_cad: down
+      indices:
+        usa500: up
+        usatec: up
+        ger40:  up
+        uk100:  up
+        jp225:  up
+      commodities:
+        gold:   neutral_to_up
+        oil:    up
+        silver: up
+      crypto:
+        btcusd: up
+        ethusd: up
+    global_multiplier: 1.00
+    allowed_asset_classes:   [fx, indices, commodities, crypto]
+    blocked_asset_classes:   []
+    notes: "Full operation mode. Confirm signals, execute normally."
+
+  risk_off:
+    definition: "Risk aversion — USD/JPY/CHF surge, equities fall, correlations converge"
+    drivers:
+      - dxy_zscore_above_1.5
+      - vix_above_20
+      - sp500_falling
+      - btc_falling
+    expected_asset_behavior:
+      fx:
+        usd_jpy: down     # JPY surges
+        usd_chf: down     # CHF surges
+        eur_usd: down
+        gbp_usd: down
+        aud_usd: down
+        nzd_usd: down
+      indices:
+        usa500: down
+        usatec: down
+        ger40:  down
+      commodities:
+        gold:   up        # safe haven
+        oil:    down      # demand destruction
+        silver: mixed
+      crypto:
+        btcusd: down
+        ethusd: down
+    global_multiplier: 0.50
+    allowed_asset_classes:   [fx]
+    reduced_asset_classes:   [commodities]
+    blocked_asset_classes:   [crypto]
+    preferred_trades:        [USDCHF_buy, USDJPY_sell, GOLD_buy]
+    notes: "Cut growth/crypto exposure. Only defensive trades or HOLD."
+
+  inflation:
+    definition: "Oil and commodities surging, yields rising, growth sector pressured"
+    drivers:
+      - oil_zscore_above_1.5
+      - gold_zscore_above_1.0
+      - yield_spread_rising
+      - dxy_mild_positive
+    expected_asset_behavior:
+      fx:
+        usd_jpy: up       # Fed tightening = USD stronger
+        usd_cad: down     # CAD benefits from oil
+        usd_nok: down     # NOK benefits from oil
+        eur_usd: mixed
+      indices:
+        usa500: down
+        usatec: down      # growth penalised most
+        ger40:  down
+      commodities:
+        gold:   up        # inflation hedge
+        oil:    up        # the driver
+        silver: up
+      crypto:
+        btcusd: mixed_to_down   # rate expectations negative
+        ethusd: down
+    global_multiplier: 0.65
+    allowed_asset_classes:   [fx, commodities]
+    reduced_asset_classes:   [indices, crypto]
+    notes: "Favour inflation hedges (GOLD, oil-correlated FX). Reduce growth."
+
+  deflation:
+    definition: "Yield curve inverted, growth slowing, demand contracting"
+    drivers:
+      - yield_spread_negative
+      - sp500_falling
+      - dxy_mixed
+      - vix_above_18
+    expected_asset_behavior:
+      fx:
+        usd_jpy: down     # JPY/CHF safe haven
+        usd_chf: down
+        aud_usd: down     # commodity demand falling
+        nzd_usd: down
+      indices:
+        usa500: down
+        usatec: mixed     # can recover on rate cut expectations
+      commodities:
+        gold:   up        # safe haven + rate cut expectations
+        oil:    down
+      crypto:
+        btcusd: mixed     # if rate cut expected, can recover
+    global_multiplier: 0.75
+    allowed_asset_classes:   [fx, commodities]
+    reduced_asset_classes:   [indices, crypto]
+    notes: "Cautious. Bond-proxy assets benefit. Avoid cyclicals."
+
+  crisis:
+    definition: "VIX exploding, correlations converging, liquidity drain"
+    drivers:
+      - vix_above_35
+      - sp500_zscore_below_minus_2
+      - btc_zscore_below_minus_2
+      - dxy_zscore_above_2
+    expected_asset_behavior:
+      everything: down_except_usd_jpy_chf_gold
+    global_multiplier: 0.0
+    allowed_asset_classes:   []
+    notes: "BLOCK ALL except explicit safe-haven defensive plays. 0.25 hard cap."
+
+  neutral:
+    definition: "No dominant direction. Mixed signals. Low scores on all dimensions."
+    global_multiplier: 0.85
+    allowed_asset_classes:   [fx, indices, commodities, crypto]
+    notes: "Standard operation. Slight discount (0.85) for uncertainty."
+
+# ── Interest rate transmission by regime ────────────────────────────────────
+interest_rate_transmission:
+
+  rate_hike:
+    consumer_effect:    spending_falls
+    durable_goods:      purchases_fall_mortgages_auto
+    firm_behavior:      capex_falls_hiring_slows_pricing_power_mixed
+    fx_effect:          local_currency_strengthens
+    equity_effect:      discount_rate_rises_valuations_fall_esp_growth
+    bond_effect:        yields_rise_duration_falls
+    commodity_effect:   dxy_pressure_negative_unless_supply_driven
+    crypto_effect:      liquidity_drain_negative
+    risk_multiplier:    0.40_to_0.70
+    most_affected:      [UsaTec, BTCUSD, ETHUSD, GOLD, EURUSD_if_US_hiking]
+
+  rate_cut:
+    consumer_effect:    spending_rises_credit_accessible
+    durable_goods:      purchases_rise
+    firm_behavior:      capex_rises_hiring_improves
+    fx_effect:          local_currency_weakens
+    equity_effect:      discount_rate_falls_multiples_expand
+    bond_effect:        yields_fall_duration_rises
+    commodity_effect:   dxy_weakens_positive_for_commodities
+    crypto_effect:      liquidity_expands_positive
+    risk_multiplier:    0.85_to_1.00
+    most_affected:      [UsaTec, BTCUSD, GOLD, EURUSD_positive]
+
+  rate_hold_hawkish:
+    consumer_effect:    uncertain_spending_cautious
+    equity_effect:      vol_from_guidance_rhetoric
+    risk_multiplier:    0.65_to_0.85
+    notes:              "Depends on forward guidance. Watch language carefully."
+
+  rate_hold_dovish:
+    consumer_effect:    spending_stable_to_rising
+    equity_effect:      relief_rally_possible
+    risk_multiplier:    0.80_to_1.00
+
+# ── Geopolitical shock rules ─────────────────────────────────────────────────
+geopolitical:
+
+  oil_supply_shock:
+    triggers:    [war_middle_east, opec_cut_surprise, pipeline_disruption]
+    assets_up:   [LCrude, Brent, GOLD, USDNOK, USDCAD_down]
+    assets_down: [Usa500, UsaTec, EURUSD, airlines_tourism]
+    multiplier:  0.50
+    action:      avoid_indices_confirm_oil_gold
+
+  global_war_risk:
+    triggers:    [major_geopolitical_escalation]
+    assets_up:   [GOLD, USDCHF, USDJPY_down, USD]
+    assets_down: [equities_global, crypto, commodities_ex_gold]
+    multiplier:  0.25
+    action:      crisis_mode
+
+  china_taiwan_risk:
+    triggers:    [taiwan_military_tension]
+    assets_up:   [GOLD, USD, JPY]
+    assets_down: [AUDUSD, AsiaIndices, semiconductors]
+    multiplier:  0.30
+    action:      reduce_all_asia_exposure
+
+# ── Credit stress rules ──────────────────────────────────────────────────────
+credit_stress:
+
+  mild:
+    definition: "Credit spreads widening modestly"
+    multiplier: 0.70
+    action:     reduce_high_beta
+
+  severe:
+    definition: "Credit spreads spiking, defaults rising"
+    assets_up:   [USD, GOLD, JPY, CHF]
+    assets_down: [equities, crypto, EM_FX, oil]
+    multiplier:  0.25
+    action:      crisis_mode_treat_as_risk_off

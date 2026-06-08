@@ -1,42 +1,15 @@
-# Core
-pandas==2.1.0
-numpy==1.25.2
-scikit-learn==1.3.0
+streamlit==1.46.1
+pandas==2.3.0
+plotly==6.1.2
+pyyaml==6.0.2
+pyinstaller==6.14.2
 
-# Trading
-MetaTrader5==5.0.45
-
-# APIs
-requests==2.31.0
-beautifulsoup4==4.12.2
-
-# Web (para health endpoint)
-fastapi==0.103.1
-uvicorn[standard]==0.23.2
-websockets==11.0.3
-plotly==5.17.0
-
-# Dashboard
-streamlit
-pyyaml==6.0.1
-
-# Database
-psycopg2-binary==2.9.7
-sqlalchemy==2.0.20
-
-# Utilities
-python-dotenv==1.0.0
-
-# Google Cloud Storage
-gcsfs==2024.3.0
-streamlit-files-connection==0.1.0
-streamlit-autorefresh
-
-# Messaging
-pyzmq>=27.0
-
-# Desktop terminal
-customtkinter>=5.2
-
-# Reports
-openpyxl>=3.1
+# FastAPI web server
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+PyJWT>=2.8.0
+python-multipart>=0.0.9
+python-dotenv>=1.0.0
+httpx>=0.27.0
+requests>=2.31.0
+numpy>=1.26.0

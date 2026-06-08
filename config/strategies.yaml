@@ -1,0 +1,79 @@
+# config/strategies.yaml — Strategy Registry
+# Activar/desactivar estratégias sem mudar código.
+# Mudar enabled: true/false e reiniciar o bot.
+
+strategies:
+
+  trend_following:
+    enabled: true
+    symbols: [EURUSD, USDJPY, Usa500, UsaTec, Ger40, GOLD, Brent, LCrude]
+    timeframes:
+      entry: M15
+      context: H1
+    params:
+      ema_fast: 20
+      ema_slow: 50
+      adx_min: 20
+      donchian_period: 20
+      crossover_lookback: 3
+
+  breakout_session:
+    enabled: true
+    symbols: [Usa500, UsaTec, Ger40, EURUSD, USDJPY, GOLD]
+    timeframes:
+      entry: M15
+      context: H1
+    params:
+      donchian_period: 20
+      adx_min: 20
+      volume_confirm: true
+      sessions: [london, new_york, london_ny_overlap]
+
+  pullback_continuation:
+    enabled: false        # Fase 3 — activar após validação de trend + breakout
+    symbols: [EURUSD, GBPUSD, USDJPY, Usa500, GOLD]
+    timeframes:
+      entry: M15
+      context: H1
+
+  scalp_momentum:
+    enabled: false        # Fase 4 — activar após pullback validado
+    symbols: [EURUSD, GBPUSD, USDJPY, Usa500, UsaTec, Ger40, GOLD]
+    timeframes:
+      entry: M5
+      context: M15
+
+# Filtros globais aplicados a todas as estratégias
+global_filters:
+  adx_min_regime: 20
+  adx_weak_regime: 15
+  spread_max_pct:
+    fx: 0.020
+    indices: 0.080
+    commodities: 0.800
+    crypto: 0.500
+  volatility_atr_mult_max: 2.5
+  news_blackout_minutes: 15
+  correlation_pairs:
+    - [EURUSD, GBPUSD]
+    - [EURUSD, AUDUSD]
+    - [GBPUSD, AUDUSD]
+    - [Usa500, UsaTec]
+    - [GOLD, SILVER]
+    - [BTCUSD, ETHUSD]
+
+# Risco multi-camada
+risk:
+  risk_pct_per_trade: 0.005        # 0.5% por trade
+  daily_loss_limit_pct: 0.03       # 3% por dia
+  loss_streak_limit: 3
+  loss_streak_pause_secs: 3600     # 60 min
+  max_positions_total: 5
+  max_positions_per_class: 2
+  max_positions_per_strategy: 2
+  exposure_per_symbol_pct: 0.02    # 2% do balance máximo por símbolo
+  exposure_per_class:
+    fx: 3
+    indices: 2
+    commodities: 2
+    crypto: 1

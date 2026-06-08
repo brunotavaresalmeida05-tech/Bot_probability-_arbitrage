@@ -1,515 +1,180 @@
-"""
-Configuration Settings - Trading Bot v6
-"""
-
+from pathlib import Path
 import os
+import yaml
 from dotenv import load_dotenv
 
-# Carregar variáveis de ambiente
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+CONFIG_DIR = BASE_DIR / "config"
+DATA_DIR = BASE_DIR / "input"
+OUTPUT_DIR = BASE_DIR / "output"
+STATE_DIR = BASE_DIR / "state"
+LOG_DIR = BASE_DIR / "logs"
 
-# ============================================================
-#  MT5 CONNECTION
-# ============================================================
-MT5_PATH = os.getenv('MT5_PATH', r'C:\Program Files\MetaTrader 5\terminal64.exe')
-MT5_LOGIN = int(os.getenv('MT5_LOGIN', '6220103'))
-MT5_PASSWORD = os.getenv('MT5_PASSWORD', 'HQPjjy1*')
-MT5_SERVER = os.getenv('MT5_SERVER', 'ActivTradesCorp-Server')
-
-# ============================================================
-#  TRADING PARAMETERS
-# ============================================================
-TIMEFRAME = 'M5'
-LOOKBACK_BARS = 500
-Z_ENTRY = 1.8
-Z_ENTER = 1.8
-Z_EXIT = 0.3
-Z_STOP = 3.5
-MA_PERIOD = 50
-MA_TYPE = 'SMA'  # ADICIONAR ESTA LINHA (ou 'EMA')
-STD_PERIOD = 20
-STDDEV_PERIOD = 20
-ATR_PERIOD = 50
-ATR_BASE_PERIOD = 50
-SL_ATR_MULT = 2.0
-
-# Risk Management
-MAX_RISK_PER_TRADE = 0.02
-MAX_POSITIONS = 5
-MAX_OPEN_POSITIONS = 3       # Máximo posições simultâneas abertas
-POSITION_SIZE = 0.01
-MAX_DAILY_LOSS_PCT = 3.0     # Limite de perda diária (3% = ~€14 com €472)
-MAX_DAILY_TRADES = 10        # Máximo trades abertos por dia
-MAX_WEEKLY_LOSS_PCT = 8.0    # Limite semanal (8%)
-
-# Magic Number
-MAGIC_NUMBER = 123456
-MAX_SLIPPAGE = 3
-
-# ============================================================
-#  LOOP & TIMING
-# ============================================================
-LOOP_INTERVAL_SECONDS = 10
-FAST_TICK_INTERVAL_MS = 200
-
-# ============================================================
-#  SYMBOLS - APENAS OS QUE FUNCIONAM
-# ============================================================
-ALL_AVAILABLE_SYMBOLS = [
-    # Forex (11)
-    "EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF", 
-    "USDCAD", "NZDUSD", "EURGBP", "EURJPY", "GBPJPY", "AUDJPY",
-    
-    # Metais (2)
-    "GOLD", "SILVER",
-    
-    # Crypto (4)
-    "BTCUSD", "ETHUSD", "XRPUSD", "SOLUSD",
-]
-
-# ============================================================
-#  SYMBOLS ALIAS
-# ============================================================
-SYMBOLS = ALL_AVAILABLE_SYMBOLS  # Alias para compatibilidade
-
-# ── Active trading symbols (curated for current capital tier) ─
-# At seed/milestone 1 (€462-€1000): trade only best 5 pairs
-# USDCHF disabled until win rate improves; NZDUSD added (AUD correlated)
-ACTIVE_SYMBOLS = [
-    'EURUSD',  # Sharpe 0.84 — stable, high liquidity
-    'GBPUSD',  # Sharpe 0.81 — active
-    'USDJPY',  # Sharpe 0.73 — active
-    'AUDUSD',  # Sharpe 1.77 — best performer
-    'NZDUSD',  # AUD-correlated — added at Milestone 1
-]
-
-# ── Lot multiplier per pair (reduce size for new/unproven pairs) ─
-LOT_MULTIPLIER_BY_PAIR = {
-    'EURUSD': 1.0,   # Full size — proven edge
-    'GBPUSD': 1.0,   # Full size — proven edge
-    'USDJPY': 1.0,   # Full size — proven edge
-    'AUDUSD': 0.5,   # Half size — first 20 trades to confirm edge
-    'NZDUSD': 0.5,   # Half size — first 20 trades to confirm edge
-    'USDCHF': 0.3,   # Reduced — underperformer, watch-only
-    'USDCAD': 1.0,   # Full size — Sharpe 2.54
-    'EURGBP': 1.0,   # Full size — Sharpe 6.0
-    'GBPJPY': 1.0,   # Full size — Sharpe 2.24
+FLAT_DEFAULTS = {
+    "mode": "paper",
+    "health_port": 8080,
+    "dashboard_port": 8501,
+    "loop_sleep_sec": 5,
+    "symbols": ["EURUSD", "GBPUSD", "BTCUSD"],
+    "paper": True,
+    "write_state_path": str(STATE_DIR / "state.json"),
+    "log_file": str(LOG_DIR / "bot.log"),
+    "history_file": str(OUTPUT_DIR / "historical_rankings.csv"),
+    "config_file": str(CONFIG_DIR / "settings.yaml"),
+    "mt5_enabled": False,
+    "live_trading_enabled": False,
+    "mt5_path": "",
+    "mt5_login": 0,
+    "mt5_password": "",
+    "mt5_server": "",
+    "mt5_timeframe": "M5",
+    "market_bars": 100,
+    "dry_run": True,
+    "kill_switch": True,
+    "max_spread": 0.0015,
+    "min_cash": 100.0,
+    "default_qty": 0.01,
+    "max_daily_loss": 0.02,
+    "max_positions": 1,
 }
 
-# ============================================================
-#  FEATURES - SIMPLIFICADO
-# ============================================================
-USE_REGIME_FILTER = False       # DESATIVADO
-USE_NEWS_FILTER = True           # ATIVADO — bloqueia 30min antes / 15min após eventos
-USE_FOREX_FACTORY_SCRAPING = True  # ATIVADO — calendário FF + Finnhub
-USE_MULTI_API_CONSENSUS = False  # DESATIVADO
-MONITOR_API_HEALTH = False       # DESATIVADO
-USE_DATA_QUALITY_SCORER = False  # DESATIVADO
-
-# Multi-strategy
-USE_MULTI_STRATEGY = True
-
-# Analytics
-USE_PERFORMANCE_ANALYTICS = True
-USE_TRADE_LOGGER = True
-
-# ============================================================
-#  ASSET METRICS (limpo)
-# ============================================================
-ASSET_METRICS = {
-    # Forex
-    "EURUSD": {"sharpe": 0.84, "win_rate": 0.55, "avg_return": 0.061, "total_trades": 187},
-    "GBPUSD": {"sharpe": 0.81, "win_rate": 0.54, "avg_return": 0.058, "total_trades": 186},
-    "USDJPY": {"sharpe": 0.73, "win_rate": 0.52, "avg_return": 0.052, "total_trades": 249},
-    "AUDUSD": {"sharpe": 1.77, "win_rate": 0.59, "avg_return": 0.137, "total_trades": 190},
-    "USDCHF": {"sharpe": 1.41, "win_rate": 0.58, "avg_return": 0.101, "total_trades": 187},
-    "USDCAD": {"sharpe": 2.54, "win_rate": 0.62, "avg_return": 0.146, "total_trades": 152},
-    "NZDUSD": {"sharpe": -0.21, "win_rate": 0.48, "avg_return": -0.016, "total_trades": 215},
-    "EURGBP": {"sharpe": 6.00, "win_rate": 0.68, "avg_return": 0.314, "total_trades": 128},
-    "EURJPY": {"sharpe": -0.23, "win_rate": 0.49, "avg_return": -0.011, "total_trades": 151},
-    "GBPJPY": {"sharpe": 2.24, "win_rate": 0.61, "avg_return": 0.126, "total_trades": 162},
-    "AUDJPY": {"sharpe": -0.15, "win_rate": 0.49, "avg_return": -0.009, "total_trades": 163},
-    
-    # Metais
-    "GOLD": {"sharpe": -0.98, "win_rate": 0.47, "avg_return": -0.055, "total_trades": 167},
-    "SILVER": {"sharpe": -1.15, "win_rate": 0.46, "avg_return": -0.071, "total_trades": 201},
-    
-    # Crypto
-    "BTCUSD": {"sharpe": -0.73, "win_rate": 0.47, "avg_return": -0.035, "total_trades": 111},
-    "ETHUSD": {"sharpe": 0.29, "win_rate": 0.50, "avg_return": 0.010, "total_trades": 91},
-    "XRPUSD": {"sharpe": 1.07, "win_rate": 0.55, "avg_return": 0.053, "total_trades": 119},
-    "SOLUSD": {"sharpe": 0.70, "win_rate": 0.52, "avg_return": 0.030, "total_trades": 120},
-}
-
-# ============================================================
-#  API KEYS
-# ============================================================
-FRED_API_KEY = os.getenv('FRED_API_KEY', '583922c6e7d2a106ee1eae29a70b90e0')
-ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY', '4F1D7CD56E2X2NE1')
-POLYGON_KEY = os.getenv('POLYGON_KEY', '2nC3wlQs0AVj8wF3kgT5jcyCNiIaB2iB')
-TWELVE_DATA_KEY = os.getenv('TWELVE_DATA_KEY', '2e602e1a9694451da0218f15a9f47bad')
-FIXER_KEY = os.getenv('FIXER_KEY', 'f47da607354dec69586e1af564bb7221')
-EODHD_KEY = os.getenv('EODHD_KEY', '69bdafa2818c60.63828076')
-NEWSAPI_KEY = os.getenv('NEWSAPI_KEY', '3c7be108d2bc47c18e36e5437a76c632')
-FINNHUB_KEY = os.getenv('FINNHUB_KEY', 'd6uquh1r01qig545jabgd6uquh1r01qig545jac0')
-MARKETAUX_KEY = os.getenv('MARKETAUX_KEY', 'Bc02zKl6R48yom6AtBEfSgMTBj9WMjM1jrRTGHVY')
-CURRENTS_KEY = os.getenv('CURRENTS_KEY', 'p1ZOufwZzjpunAkPmVDqYU5-Q0Q7XFl_sWRr9rFW5f1bc7Gs')
-MEDIASTACK_KEY = os.getenv('MEDIASTACK_KEY', 'fccc2bb417afb7ec2b7a79d6d98100de')
-CRYPTOPANIC_KEY = os.getenv('CRYPTOPANIC_KEY', '8e33959127c1a228ef55177e1c8ef5d177edb1a7')
-BINANCE_API_KEY = os.getenv('BINANCE_API_KEY', 'q1gbM0TxW5ifubXLEdR7Y6btNEKHeiGd9767WKPtxOz9fSopVwz7lO1M93koRBIV')
-BINANCE_SECRET_KEY = os.getenv('BINANCE_SECRET_KEY', '')
-COINGECKO_KEY = os.getenv('COINGECKO_KEY', 'CG-mKgvMyY9dA9CoW4cPEtG6PGd')
-ETHERSCAN_KEY = os.getenv('ETHERSCAN_KEY', 'RNWS7AIBRZEVBRUYZ9GG2Y6VSNEFSEYWM3')
-
-# ============================================================
-#  STRATEGY ALLOCATION
-# ============================================================
-STRATEGY_ALLOCATION = {
-    'pairs': 0.20,
-    'trend': 0.25,
-    'breakout': 0.20,
-    'volatility': 0.15,
-    'news': 0.10,
-    'mean_reversion': 0.10
-}
-
-# ============================================================
-#  NOTIFICATIONS (DESATIVADO)
-# ============================================================
-TELEGRAM_ENABLED = False
-EMAIL_ENABLED = False
-
-# ============================================================
-#  LOGGING
-# ============================================================
-LOG_DIR = 'logs'
-CSV_LOG_FILE = 'logs/trades.csv'
-
-# ============================================================
-#  PATHS
-# ============================================================
-DATA_DIR = 'data'
-MODELS_DIR = 'models'
-
-# ============================================================
-#  DASHBOARD
-# ============================================================
-DASHBOARD_PORT = 8765
-DASHBOARD_HOST = '127.0.0.1'
-
-# ============================================================
-#  OPTIMIZER
-# ============================================================
-USE_OPTIMIZER = True
-OPTIMIZER_ENABLED = True  # Alias
-OPTIMIZER_COMBINATIONS = 200
-OPTIMIZER_WALK_FORWARD = True
-OPTIMIZER_MAX_TRIALS = 50
-OPTIMIZER_LOOKBACK = 1000
-OPTIMIZER_INTERVAL_H = 24
-OPTIMIZER_GRID = {
-    "MA_PERIOD": [20, 50, 100],
-    "STDDEV_PERIOD": [10, 20, 30],
-    "Z_ENTER": [1.5, 2.0, 2.5],
-    "Z_EXIT": [0.2, 0.5, 0.8],
-    "Z_STOP": [3.0, 3.5, 4.0]
-}
-
-# ============================================================
-#  TIMEFRAMES
-# ============================================================
-TIMEFRAME_M5 = 'M5'
-TIMEFRAME_H1 = 'H1'
-TIMEFRAME_D1 = 'D1'
-
-# ============================================================
-#  CORRELATION
-# ============================================================
-CORRELATION_THRESHOLD = 0.7
-MAX_CORRELATED_POSITIONS = 3
-
-# ============================================================
-#  PORTFOLIO
-# ============================================================
-TOTAL_CAPITAL = 500.0
-RISK_PER_ASSET = 0.10
-
-# ============================================================
-#  NEWS SOURCES (quando reativar)
-# ============================================================
-NEWS_SOURCES = {
-    'newsapi': False,
-    'finnhub': True,
-    'marketaux': True,
-    'currents': False,
-    'mediastack': True,
-    'cryptopanic': False
-}
-
-# ============================================================
-#  DATA SOURCES WEIGHTS (quando reativar)
-# ============================================================
-DATA_SOURCE_WEIGHTS = {
-    'crypto': {
-        'binance': 0.60,
-        'coingecko': 0.40,
+NESTED_DEFAULTS = {
+    "app": {
+        "name": "TradingBot",
+        "profile": "paper",
     },
-    'forex': {
-        'twelve_data': 0.60,
-        'fixer': 0.40,
+    "mode": {
+        "dry_run": True,
+        "kill_switch": True,
     },
-    'stocks': {
-        'polygon': 0.50,
-        'eodhd': 0.50,
+    "risk": {
+        "max_spread": 0.0015,
+        "max_daily_loss": 0.02,
+        "max_positions": 1,
+        "default_qty": 0.01,
+        "min_cash": 100.0,
+    },
+    "market": {
+        "mt5_timeframe": "M5",
+        "market_bars": 100,
+        "symbols": ["EURUSD", "GBPUSD"],
+    },
+    "paths": {
+        "state_file": "state/state.json",
+        "history_file": "state/state_history.jsonl",
+    },
+    "live": {
+        "enabled": False,
+        "broker": "mt5",
+        "account_id": None,
+    },
+}
+
+
+def flatten_config(nested):
+    flat = {}
+    flat["mode"] = "live" if nested.get("live", {}).get("enabled", False) else "paper"
+    flat["paper"] = nested.get("mode", {}).get("dry_run", True)
+    flat["dry_run"] = nested.get("mode", {}).get("dry_run", True)
+    flat["kill_switch"] = nested.get("mode", {}).get("kill_switch", True)
+    risk = nested.get("risk", {})
+    flat["max_spread"] = risk.get("max_spread", 0.0015)
+    flat["max_daily_loss"] = risk.get("max_daily_loss", 0.02)
+    flat["max_positions"] = risk.get("max_positions", 1)
+    flat["default_qty"] = risk.get("default_qty", 0.01)
+    flat["min_cash"] = risk.get("min_cash", 100.0)
+    market = nested.get("market", {})
+    flat["mt5_timeframe"] = market.get("mt5_timeframe", "M5")
+    flat["market_bars"] = market.get("market_bars", 100)
+    flat["symbols"] = market.get("symbols", ["EURUSD", "GBPUSD"])
+    paths = nested.get("paths", {})
+    flat["write_state_path"] = paths.get("state_file", "state/state.json")
+    flat["history_file"] = paths.get("history_file", "state/state_history.jsonl")
+    flat["live_enabled"] = nested.get("live", {}).get("enabled", False)
+    flat["broker"] = nested.get("live", {}).get("broker", "mt5")
+    flat["account_id"] = nested.get("live", {}).get("account_id")
+    flat["profile"] = nested.get("app", {}).get("profile", "paper")
+    return flat
+
+
+def set_profile(cfg, profile="paper"):
+    if profile == "paper":
+        cfg["mode"]["dry_run"] = True
+        cfg["mode"]["kill_switch"] = True
+        cfg["live"]["enabled"] = False
+    elif profile == "live_safe":
+        cfg["mode"]["dry_run"] = True
+        cfg["mode"]["kill_switch"] = False
+        cfg["live"]["enabled"] = True
+    elif profile == "live":
+        cfg["mode"]["dry_run"] = False
+        cfg["mode"]["kill_switch"] = False
+        cfg["live"]["enabled"] = True
+    elif profile == "live_demo":
+        cfg["mode"]["dry_run"] = True
+        cfg["mode"]["kill_switch"] = True
+        cfg["live"]["enabled"] = True
+    else:
+        raise ValueError(f"Unknown profile: {profile}")
+    cfg["app"]["profile"] = profile
+    return cfg
+
+
+def deep_merge(base, override):
+    out = dict(base)
+    for k, v in (override or {}).items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def load_yaml(path):
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_config():
+    cfg = deep_merge(dict(NESTED_DEFAULTS), load_yaml(CONFIG_DIR / "config.yaml"))
+
+    profile = cfg.get("app", {}).get("profile", "paper")
+    cfg = set_profile(cfg, profile)
+
+    flat = flatten_config(cfg)
+    for k, v in FLAT_DEFAULTS.items():
+        flat.setdefault(k, v)
+
+    flat["config_file"] = str(CONFIG_DIR / "config.yaml")
+    flat["log_file"] = str(LOG_DIR / "bot.log")
+    flat["write_state_path"] = str(STATE_DIR / Path(flat.get("write_state_path", "state.json")).name)
+    flat["history_file"] = str(OUTPUT_DIR / Path(flat.get("history_file", "state_history.jsonl")).name)
+
+    env_overrides = {
+        "mode": ("BOT_MODE", str),
+        "health_port": ("HEALTH_PORT", int),
+        "dashboard_port": ("DASHBOARD_PORT", int),
+        "loop_sleep_sec": ("LOOP_SLEEP_SEC", int),
+        "mt5_enabled": ("MT5_ENABLED", lambda v: v.lower() in ("1", "true", "yes")),
+        "mt5_login": ("MT5_LOGIN", int),
+        "mt5_password": ("MT5_PASSWORD", str),
+        "mt5_server": ("MT5_SERVER", str),
+        "mt5_path": ("MT5_PATH", str),
     }
-}
+    for key, (env_var, cast) in env_overrides.items():
+        val = os.getenv(env_var)
+        if val is not None:
+            flat[key] = cast(val)
 
-# ============================================================
-#  CONSENSUS
-# ============================================================
-CONSENSUS_MIN_SOURCES = 2
-CONSENSUS_MIN_CONFIDENCE = 0.80
+    env_symbols = os.getenv("SYMBOLS")
+    if env_symbols:
+        flat["symbols"] = [s.strip() for s in env_symbols.split(",") if s.strip()]
 
-# ============================================================
-#  FILTERS & PROTECTIONS
-# ============================================================
+    for p in [DATA_DIR, OUTPUT_DIR, STATE_DIR, LOG_DIR]:
+        p.mkdir(parents=True, exist_ok=True)
 
-# Time Filter (horários de trading)
-USE_TIME_FILTER = False  # ADICIONAR
-
-# Macro Score Blocking
-MACRO_BLOCK_SCORE = -50  # ADICIONAR (score mínimo para permitir trades)
-
-# ============================================================
-#  ARBITRAGE / STAT-ARB PARAMETERS
-# ============================================================
-ARB_Z_ENTER = 2.0           # Z-score para entrar no par
-ARB_Z_EXIT = 0.5            # Z-score para fechar posição
-ARB_Z_STOP = 4.0            # Z-score stop-loss
-ARB_MIN_CORRELATION = 0.7   # Correlação mínima entre pares
-
-# ============================================================
-#  ARBITRAGE
-# ============================================================
-ARB_EXTRA_SYMBOLS = []  # Símbolos extras para arbitragem (vazio por agora)
-USE_ARBITRAGE = False   # Desativado por agora
-TRIANGULAR_ARB_ENABLED = False
-
-# ============================================================
-#  MULTI-TIMEFRAME
-# ============================================================
-USE_MULTI_TIMEFRAME = True
-MTF_TIMEFRAMES = ['M5', 'H1', 'D1']
-
-# ============================================================
-#  PORTFOLIO MANAGER
-# ============================================================
-USE_PORTFOLIO_MANAGER = True
-
-# ============================================================
-#  MACRO ENGINE
-# ============================================================
-USE_MACRO_ENGINE = True
-MACRO_LAYERS = 7
-
-# ============================================================
-#  PROFESSIONAL CAPITAL SCALING
-# ============================================================
-
-# Compounding Strategy
-USE_COMPOUNDING = True
-TARGET_MONTHLY_RETURN = 0.15  # 15% conservador (ou 0.25 agressivo)
-INITIAL_CAPITAL = 464.63  # Capital inicial atual
-
-# ── Retail Milestones (small account €462 → €5000+) ──────────
-# Cada tier define o lot base e o risco % por trade
-RETAIL_MILESTONES = [
-    {'name': 'Seed',        'min': 0,     'max': 500,   'base_lot': 0.02, 'risk_pct': 1.0},
-    {'name': 'Milestone 1', 'min': 500,   'max': 1000,  'base_lot': 0.03, 'risk_pct': 1.0},
-    {'name': 'Milestone 2', 'min': 1000,  'max': 2500,  'base_lot': 0.06, 'risk_pct': 1.0},
-    {'name': 'Milestone 3', 'min': 2500,  'max': 5000,  'base_lot': 0.12, 'risk_pct': 1.0},
-    {'name': 'Target',      'min': 5000,  'max': float('inf'), 'base_lot': 0.25, 'risk_pct': 1.0},
-]
-
-# Kelly Criterion
-USE_KELLY_SIZING = True
-KELLY_MIN_TRADES = 30  # Mínimo de trades para calcular Kelly
-
-# Anti-Martingale (scale winners)
-USE_ANTI_MARTINGALE = True
-ANTI_MARTINGALE_MAX_MULTIPLIER = 4.0
-
-# Pyramiding (adicionar em vencedores)
-PYRAMIDING_ENABLED = True
-PYRAMIDING_MAX_ADDS = 2
-PYRAMIDING_MIN_PROFIT_PCT = 0.02  # 2%
-PYRAMIDING_SIZE_MULTIPLIER = 0.5  # Cada add = 50% do inicial
-
-# Volatility Scaling
-USE_VOLATILITY_SCALING = True
-VOLATILITY_SCALING_MIN = 0.5
-VOLATILITY_SCALING_MAX = 2.0
-
-# ============================================================
-#  PRICE ACTION STRATEGIES
-# ============================================================
-
-# Supply/Demand Zones
-USE_SUPPLY_DEMAND = True
-SUPPLY_DEMAND_ZONE_STRENGTH = 2  # Mínimo touches
-SUPPLY_DEMAND_ZONE_AGE = 50  # Máximo bars idade
-SUPPLY_DEMAND_MIN_MOVE = 0.015  # 1.5% movimento mínimo
-
-# Pin Bar Reversals
-USE_PIN_BAR = True
-PIN_BAR_SHADOW_RATIO = 2.0  # Shadow > 2x body
-PIN_BAR_SHADOW_PCT = 0.60  # Shadow > 60% total
-PIN_BAR_Z_THRESHOLD = 2.0  # Só em extremos Z > 2.0
-
-# ============================================================
-#  ADVANCED PRICE ACTION STRATEGIES
-# ============================================================
-
-# Inside Bar Breakout
-USE_INSIDE_BAR = True
-INSIDE_BAR_MIN_MOTHER = 0.003  # 30 pips mínimo
-INSIDE_BAR_MAX_RATIO = 0.70    # Inside <= 70% mother
-INSIDE_BAR_BUFFER = 0.0001     # Buffer breakout
-
-# Engulfing Patterns
-USE_ENGULFING = True
-ENGULFING_MIN_BODY = 0.60      # Corpo >= 60% da vela
-ENGULFING_MARGIN = 1.05        # Engolfar 105%
-ENGULFING_Z_THRESHOLD = 1.5    # Só em extremos
-
-# Fibonacci Retracements
-USE_FIBONACCI = True
-FIB_LOOKBACK_SWING = 50        # Bars para swing
-FIB_TOLERANCE = 0.0005         # 5 pips tolerância
-FIB_KEY_LEVELS = [0.382, 0.500, 0.618]  # Níveis principais
-
-# ============================================================
-#  AUTOMATION & NOTIFICATIONS
-# ============================================================
-
-# Telegram
-USE_TELEGRAM = True
-TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-TELEGRAM_CHAT_ID = "YOUR_CHAT_ID_HERE"
-
-# Email (opcional)
-USE_EMAIL = False
-EMAIL_SMTP_SERVER = "smtp.gmail.com"
-EMAIL_SMTP_PORT = 587
-EMAIL_FROM = "your_email@gmail.com"
-EMAIL_PASSWORD = "your_app_password"
-EMAIL_TO = "your_email@gmail.com"
-
-# Auto-restart
-AUTO_RESTART_ENABLED = True
-MAX_RESTARTS = 5
-RESTART_COOLDOWN_MIN = 5
-
-# Daily reports
-DAILY_REPORT_ENABLED = True
-REPORT_TIME_HOUR = 18       # 18:00 — relatório diário
-REPORT_DRAWDOWN_ALERT_PCT = 2.0  # Alerta se drawdown diário > 2%
-
-# Email report credentials (set in .env)
-REPORT_EMAIL_FROM     = os.getenv('REPORT_EMAIL_FROM', '')
-REPORT_EMAIL_PASSWORD = os.getenv('REPORT_EMAIL_PASSWORD', '')
-REPORT_EMAIL_TO       = os.getenv('REPORT_EMAIL_TO', REPORT_EMAIL_FROM)
-REPORT_SMTP_SERVER    = os.getenv('REPORT_SMTP_SERVER', 'smtp.gmail.com')
-REPORT_SMTP_PORT      = int(os.getenv('REPORT_SMTP_PORT', '587'))
-
-# Config backup
-AUTO_BACKUP_ENABLED = True
-BACKUP_INTERVAL_HOURS = 24
-
-
-# ============================================================
-#  MISSING PARAMETERS (required by src/strategy.py)
-# ============================================================
-
-USE_STDDEV           = True         # True = stddev denominator, False = ATR-based
-ATR_MULT_FOR_Z       = 1.0          # ATR multiplier when USE_STDDEV = False
-SYMBOLS_24_7         = ['BTCUSD', 'ETHUSD', 'XRPUSD', 'SOLUSD']  # Crypto trades 24/7
-SESSION_START_HOUR   = 7            # Trading session start (UTC)
-SESSION_END_HOUR     = 21           # Trading session end (UTC)
-MAX_TRADES_PER_DAY   = 10           # Max trades per symbol per day
-MAX_CONSECUTIVE_LOSSES = 5          # Pause after N consecutive losses
-USE_Z_STOP           = True         # Use Z-score for stop loss
-USE_ATR_STOP         = False        # Use ATR for stop loss (fallback)
-MACRO_LOT_MAX_MULT   = 2.0          # Max lot multiplier from macro engine
-
-# ============================================================
-#  Z-SCORE THRESHOLDS BY PAIR (Phase 3 optimisation)
-# ============================================================
-Z_SCORE_BY_PAIR = {
-    'EURUSD': {'entry': 1.8, 'exit': 0.4, 'lookback': 20},  # Sharpe 0.84 — slightly aggressive
-    'GBPUSD': {'entry': 2.2, 'exit': 0.6, 'lookback': 25},  # More volatile — conservative
-    'USDJPY': {'entry': 2.0, 'exit': 0.5, 'lookback': 20},  # Standard
-    'AUDUSD': {'entry': 1.9, 'exit': 0.5, 'lookback': 18},  # Sharpe 1.77 — slightly aggressive
-    'USDCHF': {'entry': 2.3, 'exit': 0.7, 'lookback': 30},  # Underperformer — conservative
-    'USDCAD': {'entry': 1.8, 'exit': 0.4, 'lookback': 18},  # Sharpe 2.54 — aggressive
-    'NZDUSD': {'entry': 2.5, 'exit': 0.8, 'lookback': 30},  # Sharpe -0.21 — very conservative
-    'EURGBP': {'entry': 1.6, 'exit': 0.3, 'lookback': 15},  # Sharpe 6.0 — most aggressive
-    'EURJPY': {'entry': 2.5, 'exit': 0.8, 'lookback': 30},  # Sharpe -0.23 — conservative
-    'GBPJPY': {'entry': 1.9, 'exit': 0.5, 'lookback': 20},  # Sharpe 2.24 — aggressive
-    'AUDJPY': {'entry': 2.4, 'exit': 0.7, 'lookback': 28},  # Sharpe -0.15 — conservative
-    'GOLD':   {'entry': 2.5, 'exit': 0.8, 'lookback': 30},  # Underperformer
-    'SILVER': {'entry': 2.5, 'exit': 0.8, 'lookback': 30},  # Underperformer
-    'BTCUSD': {'entry': 2.5, 'exit': 0.8, 'lookback': 30},  # Negative Sharpe
-    'ETHUSD': {'entry': 2.2, 'exit': 0.6, 'lookback': 25},  # Borderline
-    'XRPUSD': {'entry': 2.0, 'exit': 0.5, 'lookback': 20},  # Sharpe 1.07
-    'SOLUSD': {'entry': 2.1, 'exit': 0.5, 'lookback': 22},  # Sharpe 0.70
-}
-
-# ============================================================
-#  SPREAD FILTER
-# ============================================================
-
-# Spread máximo por tipo de símbolo (em pontos)
-MAX_SPREAD_FOREX = 20       # Pares forex
-MAX_SPREAD_CRYPTO = 100     # Crypto
-MAX_SPREAD_INDICES = 50     # Índices
-MAX_SPREAD_COMMODITIES = 30 # Commodities
-MAX_SPREAD_DEFAULT = 30     # Default
-
-def get_max_spread_for_symbol(symbol: str) -> float:
-    """
-    Retorna spread máximo aceitável para o símbolo
-    
-    Args:
-        symbol: Nome do símbolo (ex: EURUSD, BTCUSD)
-        
-    Returns:
-        float: Spread máximo em pontos
-    """
-    symbol = symbol.upper()
-    
-    # Crypto
-    if any(x in symbol for x in ['BTC', 'ETH', 'XRP', 'SOL', 'ADA']):
-        return MAX_SPREAD_CRYPTO
-    
-    # Commodities
-    if any(x in symbol for x in ['GOLD', 'SILVER', 'OIL', 'GAS']):
-        return MAX_SPREAD_COMMODITIES
-    
-    # Índices
-    if any(x in symbol for x in ['SPX', 'NAS', 'DAX', 'FTSE', 'NDX']):
-        return MAX_SPREAD_INDICES
-    
-    # Forex (default)
-    if any(x in symbol for x in ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD']):
-        return MAX_SPREAD_FOREX
-    
-    return MAX_SPREAD_DEFAULT
-
-# ============================================================
-#  ATR PARAMETERS (para volatility scaling)
-# ============================================================
-
-ATR_MIN_MULT = 0.5   # Multiplicador mínimo de ATR
-ATR_MAX_MULT = 2.0   # Multiplicador máximo de ATR
-ATR_REFERENCE = 14   # Período de referência ATR
+    return flat

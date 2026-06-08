@@ -1,0 +1,305 @@
+# config/macro_asset_map.yaml
+# Macro profile per symbol: drivers, events, sensitivity, risk mode.
+# Used by AssetMacroProfile + InterestRateTransmissionEngine.
+#
+# risk_mode: low | medium | medium_high | high
+# rate_sensitivity: multiplier on lot when rate direction aligns/conflicts
+#   range -1.0 to +1.0  (negative = adverse when that rate move happens)
+# event_blackout_min: minutes before/after key event to block entry
+# confirm_data: external data points that confirm the signal direction
+
+symbols:
+
+  EURUSD:
+    primary_drivers:    [fed, ecb, dxy, yields]
+    secondary_drivers:  [cpi_us, cpi_eu, nfp, gdp_gap]
+    key_events:         [fomc, ecb_rate, cpi_us, cpi_eu, nfp, pce]
+    risk_mode:          medium
+    event_blackout_min: 30
+    rate_sensitivity:
+      us_hike:    -0.80   # Fed hike → USD ↑ → EURUSD ↓
+      us_cut:     +0.70   # Fed cut  → USD ↓ → EURUSD ↑
+      eu_hike:    +0.60   # ECB hike → EUR ↑
+      eu_cut:     -0.50
+    confirm_data:       [dxy_direction, yield_spread_us_eu]
+    macro_notes: "Driven by Fed/ECB differential. DXY is the primary proxy."
+
+  GBPUSD:
+    primary_drivers:    [boe, fed, dxy]
+    secondary_drivers:  [cpi_uk, gdp_uk, risk_sentiment]
+    key_events:         [boe_rate, cpi_uk, gdp_uk, fomc, nfp]
+    risk_mode:          medium
+    event_blackout_min: 30
+    rate_sensitivity:
+      us_hike:    -0.75
+      us_cut:     +0.65
+      uk_hike:    +0.55
+      uk_cut:     -0.45
+    confirm_data:       [dxy_direction, boe_tone]
+
+  USDJPY:
+    primary_drivers:    [fed, boj, yields, carry]
+    secondary_drivers:  [vix, risk_sentiment, jgb_policy]
+    key_events:         [fomc, boj_rate, cpi_us, cpi_jp, payrolls]
+    risk_mode:          high
+    event_blackout_min: 45
+    rate_sensitivity:
+      us_hike:    +0.70   # Fed hike → USD ↑ → USDJPY ↑
+      us_cut:     -0.65
+      jp_hike:    -0.80   # BoJ hike → JPY ↑ → USDJPY ↓  (carry unwind)
+      jp_cut:     +0.30
+    confirm_data:       [us10y_direction, risk_regime]
+    macro_notes: "Most carry-trade sensitive pair. BoJ surprises = extreme vol."
+
+  AUDUSD:
+    primary_drivers:    [pboc, rba, commodities, china_data]
+    secondary_drivers:  [dxy, risk_on_off, iron_ore]
+    key_events:         [rba_rate, china_pmi, cpi_au, nfp]
+    risk_mode:          high
+    event_blackout_min: 25
+    rate_sensitivity:
+      us_hike:    -0.65
+      us_cut:     +0.55
+      au_hike:    +0.45
+      au_cut:     -0.40
+    confirm_data:       [china_pmi, oil_direction, sp500_regime]
+    macro_notes: "China PMI and iron ore are better predictors than rate alone."
+
+  NZDUSD:
+    primary_drivers:    [pboc, rbnz, commodities, risk_on]
+    secondary_drivers:  [dxy, dairy, china_data]
+    key_events:         [rbnz_rate, china_pmi, cpi_nz]
+    risk_mode:          high
+    event_blackout_min: 25
+    rate_sensitivity:
+      us_hike:    -0.60
+      us_cut:     +0.50
+      nz_hike:    +0.40
+      nz_cut:     -0.35
+    confirm_data:       [china_pmi, risk_regime]
+
+  USDCHF:
+    primary_drivers:    [snb, fed, stress]
+    secondary_drivers:  [gold, vix, risk_off]
+    key_events:         [snb_rate, fomc, stress_events]
+    risk_mode:          medium
+    event_blackout_min: 30
+    rate_sensitivity:
+      us_hike:    +0.50
+      us_cut:     -0.45
+      ch_hike:    -0.55
+      ch_cut:     +0.40
+    confirm_data:       [vix, gold_direction]
+    macro_notes: "CHF is a safe haven — inverse relationship with risk appetite."
+
+  USDCAD:
+    primary_drivers:    [boc, oil, fed]
+    secondary_drivers:  [wti_brent, cpi_ca, risk_regime]
+    key_events:         [boc_rate, cpi_ca, oil_inventory, fomc]
+    risk_mode:          medium_high
+    event_blackout_min: 25
+    rate_sensitivity:
+      us_hike:    +0.40
+      us_cut:     -0.35
+      ca_hike:    -0.45
+      ca_cut:     +0.35
+    confirm_data:       [oil_direction, boc_tone]
+    macro_notes: "Oil is the single most important driver for CAD."
+
+  EURJPY:
+    primary_drivers:    [ecb, boj, carry, risk]
+    secondary_drivers:  [yields, risk_on_off, stress]
+    key_events:         [ecb_rate, boj_rate, fomc, risk_events]
+    risk_mode:          high
+    event_blackout_min: 40
+    rate_sensitivity:
+      eu_hike:    +0.50
+      eu_cut:     -0.40
+      jp_hike:    -0.75   # BoJ hawkish = carry unwind = EURJPY ↓
+      jp_cut:     +0.25
+    confirm_data:       [risk_regime, yield_spread_eu_jp]
+
+  USDNOK:
+    primary_drivers:    [oil, fed, norges_bank]
+    secondary_drivers:  [risk_regime, cpi_no]
+    key_events:         [norges_rate, oil_inventory, fomc]
+    risk_mode:          medium_high
+    event_blackout_min: 20
+    rate_sensitivity:
+      us_hike:    +0.35
+      us_cut:     -0.30
+      no_hike:    -0.40
+      no_cut:     +0.30
+    confirm_data:       [oil_direction]
+
+  USDMXN:
+    primary_drivers:    [fed, banxico, risk_em]
+    secondary_drivers:  [dxy, oil, political_risk]
+    key_events:         [banxico_rate, fomc, cpi_mx]
+    risk_mode:          high
+    event_blackout_min: 20
+    rate_sensitivity:
+      us_hike:    +0.70
+      us_cut:     -0.55
+      mx_hike:    -0.50
+    confirm_data:       [risk_regime, dxy_direction]
+    macro_notes: "High sensitivity to risk-off and USD strength."
+
+  # ── Indices ──────────────────────────────────────────────────────────────
+
+  Usa500:
+    primary_drivers:    [fed, yields, risk_regime]
+    secondary_drivers:  [credit_spreads, vix, payrolls]
+    key_events:         [fomc, cpi_us, nfp, pce]
+    risk_mode:          medium_high
+    event_blackout_min: 30
+    rate_sensitivity:
+      us_hike:    -0.60
+      us_cut:     +0.65
+    confirm_data:       [vix, sp500_breadth, credit_regime]
+
+  UsaTec:
+    primary_drivers:    [fed, yields, risk_on]
+    secondary_drivers:  [vix, cpi_us, pce, payrolls]
+    key_events:         [fomc, cpi_us, pce, nfp]
+    risk_mode:          high
+    event_blackout_min: 30
+    rate_sensitivity:
+      us_hike:    -0.80   # Nasdaq most sensitive to rate hikes (duration risk)
+      us_cut:     +0.80
+    confirm_data:       [yields_10y, vix, sp500_regime]
+    macro_notes: "Highest duration sensitivity. Yields rising = strong headwind."
+
+  Ger40:
+    primary_drivers:    [ecb, fed, eu_growth]
+    secondary_drivers:  [pmi_de, cpi_eu, yields_eu]
+    key_events:         [ecb_rate, cpi_eu, pmi_de, fomc]
+    risk_mode:          medium_high
+    event_blackout_min: 25
+    rate_sensitivity:
+      eu_hike:    -0.55
+      eu_cut:     +0.55
+      us_hike:    -0.30
+    confirm_data:       [eu_sentiment, risk_regime]
+
+  UK100:
+    primary_drivers:    [boe, gbp, fed]
+    secondary_drivers:  [cpi_uk, growth_uk, risk_sentiment]
+    key_events:         [boe_rate, cpi_uk, gdp_uk, fomc]
+    risk_mode:          medium
+    event_blackout_min: 25
+    rate_sensitivity:
+      uk_hike:    -0.35   # BoE hike: UK100 mixed (some constituents benefit)
+      uk_cut:     +0.40
+    confirm_data:       [gbp_direction, risk_regime]
+
+  Jp225:
+    primary_drivers:    [boj, jpy, fed, carry]
+    secondary_drivers:  [usdjpy, global_yields, risk_on]
+    key_events:         [boj_rate, fomc, japan_cpi]
+    risk_mode:          high
+    event_blackout_min: 45
+    rate_sensitivity:
+      us_hike:    -0.25
+      jp_hike:    -0.70   # BoJ hike = JPY strong = Jp225 ↓ (export hurt)
+      jp_cut:     +0.35
+    confirm_data:       [usdjpy_direction, risk_regime]
+    macro_notes: "BoJ policy changes = extreme volatility. Wide blackout always."
+
+  # ── Commodities ──────────────────────────────────────────────────────────
+
+  GOLD:
+    primary_drivers:    [real_yields, fed, dxy, stress]
+    secondary_drivers:  [vix, cpi_us, pce, geopolitics]
+    key_events:         [fomc, cpi_us, pce, financial_stress]
+    risk_mode:          high
+    event_blackout_min: 30
+    rate_sensitivity:
+      us_hike:    -0.55   # Nominal hike but real yield ↑ = GOLD ↓
+      us_cut:     +0.65   # Real yield ↓ = GOLD ↑
+    confirm_data:       [real_yield_direction, dxy_direction, vix]
+    macro_notes: "Real yields are more important than nominal. DXY is secondary."
+
+  SILVER:
+    primary_drivers:    [fed, dxy, industrial_demand]
+    secondary_drivers:  [gold, yields, pmi_global]
+    key_events:         [fomc, cpi_us, pmi_data]
+    risk_mode:          medium_high
+    event_blackout_min: 25
+    rate_sensitivity:
+      us_hike:    -0.65
+      us_cut:     +0.60
+    confirm_data:       [gold_direction, industrial_pmi]
+    macro_notes: "Part precious metal, part industrial. PMI matters."
+
+  LCrude:
+    primary_drivers:    [opec, geopolitics, dxy, demand]
+    secondary_drivers:  [inventories, growth_global, risk_regime]
+    key_events:         [opec_meeting, inventory_report, geopolitical_events]
+    risk_mode:          high
+    event_blackout_min: 15
+    rate_sensitivity:
+      us_hike:    -0.30   # USD ↑ pressures oil (priced in USD)
+      us_cut:     +0.25
+    confirm_data:       [inventory_direction, opec_stance, dxy]
+    macro_notes: "Supply shocks dominate. Geopolitics can override all macro."
+
+  Brent:
+    primary_drivers:    [opec, geopolitics, dxy, eu_demand]
+    secondary_drivers:  [inventories, growth_global, risk_regime]
+    key_events:         [opec_meeting, inventory_report, geopolitical_events]
+    risk_mode:          high
+    event_blackout_min: 15
+    rate_sensitivity:
+      us_hike:    -0.30
+      us_cut:     +0.25
+    confirm_data:       [inventory_direction, opec_stance]
+
+  NGas:
+    primary_drivers:    [weather, storage, supply_local]
+    secondary_drivers:  [seasonality, production, exports]
+    key_events:         [storage_report, weather_events]
+    risk_mode:          high
+    event_blackout_min: 10
+    rate_sensitivity:
+      us_hike:    -0.10   # Rate largely irrelevant vs supply/demand
+      us_cut:     +0.10
+    confirm_data:       [storage_direction, weather_outlook]
+    macro_notes: "Supply and weather dominate. Monetary policy has little effect."
+
+  Coffee:
+    primary_drivers:    [weather, supply, dxy]
+    secondary_drivers:  [harvest, demand, EM_currencies]
+    key_events:         [harvest_reports, weather_events]
+    risk_mode:          high
+    event_blackout_min: 10
+    rate_sensitivity:
+      us_hike:    -0.20
+      us_cut:     +0.15
+    confirm_data:       [supply_outlook, dxy_direction]
+
+  # ── Crypto ───────────────────────────────────────────────────────────────
+
+  BTCUSD:
+    primary_drivers:    [fed, dxy, yields, global_liquidity]
+    secondary_drivers:  [vix, nasdaq, risk_on, crypto_sentiment]
+    key_events:         [fomc, cpi_us, pce, nfp]
+    risk_mode:          high
+    event_blackout_min: 30
+    rate_sensitivity:
+      us_hike:    -0.75   # Tightening = liquidity drain = BTC ↓
+      us_cut:     +0.70   # Easing = liquidity expansion = BTC ↑
+    confirm_data:       [nasdaq_regime, dxy_direction, vix]
+    macro_notes: "Highly sensitive to Fed liquidity cycle. Treat as risk asset."
+
+  ETHUSD:
+    primary_drivers:    [fed, dxy, yields, btc, liquidity]
+    secondary_drivers:  [vix, eth_flows, crypto_sentiment]
+    key_events:         [fomc, cpi_us, pce, nfp]
+    risk_mode:          high
+    event_blackout_min: 30
+    rate_sensitivity:
+      us_hike:    -0.80   # Higher vol than BTC
+      us_cut:     +0.75
+    confirm_data:       [btc_direction, risk_regime, nasdaq_regime]
+    macro_notes: "Higher vol than BTC. Same macro drivers but amplified."

@@ -1,0 +1,54 @@
+# Universo de pares elegíveis para stat-arb
+# Premissa P2 — AGENTS.md secção 6
+# Spec: .ai/specs/dynamic-zscore-entry.md
+
+liquidity_window_utc:
+  start: "13:00"
+  end: "16:30"
+  description: "London/NY overlap — liquidez máxima"
+
+turning_point:
+  percentile: 85
+  lookback_bars: 100
+  exhaustion_ratio: 0.5
+
+forex_pairs:
+  timeframe: M5
+  half_life_max_bars: 50
+  half_life_min_bars: 2
+  min_correlation: 0.75
+  min_bars_adf: 60
+  confirm_bars: 2
+  cost_safety_multiplier: 2.5
+  eligible_crosses:
+    - symbols: [EURUSD, GBPUSD]
+      description: "EUR-bloc, alta correlação estrutural"
+      typical_bid_ask_pips: 0.5
+      swap_note: "depende de diferencial USD/EUR vs USD/GBP"
+    - symbols: [AUDUSD, NZDUSD]
+      description: "Commodity-bloc, elevada cointegração"
+      typical_bid_ask_pips: 0.7
+      swap_note: "geralmente positivo no lado longo AUD"
+    - symbols: [USDCHF, USDJPY]
+      description: "Safe-haven bloc"
+      typical_bid_ask_pips: 0.6
+      swap_note: "swap JPY negativo frequente — validar"
+
+index_pairs:
+  timeframe: M15
+  half_life_max_bars: 50
+  half_life_min_bars: 3
+  min_correlation: 0.80
+  min_bars_adf: 60
+  confirm_bars: 3
+  cost_safety_multiplier: 2.5
+  eligible_crosses:
+    - symbols: [SPX500, DAX40]
+      description: "EUA vs Europa, correlação alta em Londres"
+      typical_bid_ask_pips: 1.5
+    - symbols: [SPX500, FTSE100]
+      description: "EUA vs UK"
+      typical_bid_ask_pips: 1.5
+    - symbols: [DAX40, FTSE100]
+      description: "Europa continental vs UK"
+      typical_bid_ask_pips: 1.2

@@ -1,0 +1,55 @@
+app:
+  name: TradingBot
+  profile: live_demo
+mode:
+  dry_run: true
+  kill_switch: true
+risk:
+  max_spread: 0.0015
+  max_daily_loss: 0.03    # alinhado com strategies.yaml daily_loss_limit_pct e kill_switch (era 0.02)
+  max_positions: 5        # alinhado com strategies.yaml max_positions_total (era 3)
+  default_qty: 0.01
+  min_cash: 100.0
+  sl_atr_mult: 1.5
+  tp_atr_mult: 1.5
+market:
+  mt5_timeframe: M15      # engine usa strategies.yaml TFs; este campo é para o BotApp legacy loop
+  market_bars: 200
+  symbols:                # lista completa dos símbolos usados pelas estratégias
+  - EURUSD
+  - GBPUSD
+  - USDJPY
+  - Usa500
+  - UsaTec
+  - Ger40
+  - GOLD
+  - Brent
+  - LCrude
+paths:
+  state_file: state/state.json
+  history_file: state/state_history.jsonl
+checks:
+  allowed_bar_age_s: 600   # 10 min — era 7200 (2h), inútil para M15/H1
+  max_latency_p95_ms: 500
+live:
+  enabled: true
+  broker: mt5
+  account_id: 6238864
+providers:
+  fred:
+    enabled: true
+    api_key_env: FRED_API_KEY
+    series_id: CPIAUCSL
+  finnhub:
+    enabled: true
+    api_key_env: FINNHUB_API_KEY
+  newsapi:
+    enabled: true
+    api_key_env: NEWSAPI_API_KEY
+    query: "forex OR markets"
+
+mt5_enabled: true
+mt5_login_env: MT5_LOGIN
+mt5_password_env: MT5_PASSWORD
+mt5_server_env: MT5_SERVER
+mt5_path_env: MT5_PATH
