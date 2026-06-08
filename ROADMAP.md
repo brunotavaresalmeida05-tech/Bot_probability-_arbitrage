@@ -22,6 +22,8 @@ Fase 5  [COMPLETA]   Score Engine            — TotalScore 7 componentes: MCS+B
 Fase 6  [COMPLETA]   Execucao e Risco        — order_manager, professional_risk, VaR, execution_validator
 Fase 7  [COMPLETA]   Sessao e Validacao      — market_sessions, prep_workflow, checks/, scripts/
 Fase 7b [COMPLETA]   Opportunity-Permission  — scanner.py: OpportunityScore + PermissionScore, 2 fases independentes
+Fase 7c [COMPLETA]   RSI + Calibracao        — RSI(14) gate + RSICalibrationPolicy + checks/rsi_report.py
+Fase 7d [COMPLETA]   Idiosyncratic Move      — TECNICO_PURO: macro neutro + técnicos fortes -> entrada conservadora
 Fase 8  [EM CURSO]   Validacao 7 Dias        — Day 6 de 7 (iniciada 2026-06-03, fim previsto 2026-06-10)
 Fase 9  [PENDENTE]   Dashboard V9            — server/ FastAPI + dashboard/ React integrados com dados V9
 Fase 9b [PENDENTE]   Testes Unitarios        — Hi-Lo + ATR Stop + TotalScore (divida tecnica alta)
@@ -437,7 +439,9 @@ Task 11.5 — Testar acesso dashboard de telemovel    [S]  — HTTPS + auth JWT
 | 2026-06-04 | Hierarquia 4 camadas formalizada | Funcao fixa por indicador: direcao/volatilidade/range/stop/confirmacao/contexto/risco |
 | 2026-06-04 | Opportunity-Permission Engine | TotalScore dividido em 2 fases independentes. Spec: .ai/specs/opportunity-permission-engine.md |
 | 2026-06-05 | ROADMAP.md formalizado | Ficheiro vivo de planificacao: actualizar sempre que nova integracao discutida |
-| 2026-06-08 | RSI(14) integrado no scanner | rsi=50.0 neutro por defeito (sem efeito retroactivo). Momentum zone (+0.02 opp), extremo mod (-0.03 opp, RS+0.07), extremo forte (-0.06 opp, RS+0.15). checks/rsi_report.py para validacao |
+| 2026-06-08 | RSI(14) integrado no scanner | rsi=50.0 neutro por defeito. Momentum +0.02, extremo mod -0.03/RS+0.07, extremo forte -0.06/RS+0.15. checks/rsi_report.py |
+| 2026-06-08 | RSI Calibration Policy | config/rsi_calibration.yaml + src/engine/rsi_calibration.py. Peso dinamico por classe x TF x vol_regime. Matriz: increase/maintain/reduce/disable. --calibrate e --apply no rsi_report |
+| 2026-06-08 | Idiosyncratic Move (TECNICO_PURO) | Novo Scenario.TECNICO_PURO activa quando macro=neutro mas 3/4 indicadores (MACD+HiLo+ATRStop+SAR) concordam e TS>=0.72. Gates elevados: 5/8 confirms, lote×0.50 (sem macro), conf<=7. Activar/desactivar: strategies.yaml idiosyncratic_move.enabled |
 
 ---
 

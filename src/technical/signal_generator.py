@@ -38,10 +38,114 @@ from src.macro.macro_context import MacroContext
 import logging
 logger = logging.getLogger(__name__)
 
-SIGNAL_BUY  = "BUY"
-SIGNAL_SELL = "SELL"
-SIGNAL_HOLD = "HOLD"
+SIGNAL_BUY   = "BUY"
+SIGNAL_SELL  = "SELL"
+SIGNAL_HOLD  = "HOLD"
 SIGNAL_BLOCK = "BLOCKED"
+
+# ── Idiosyncratic move config (lazy-loaded once from strategies.yaml) ─────────
+_IDIO_CFG: dict | None = None
+
+
+def _get_idio_config() -> dict:
+    global _IDIO_CFG
+    if _IDIO_CFG is None:
+        try:
+            import yaml
+            from pathlib import Path
+            data = yaml.safe_load(Path("config/strategies.yaml").read_text(encoding="utf-8")) or {}
+            _IDIO_CFG = data.get("strategies", {}).get("idiosyncratic_move", {})
+        except Exception:
+            _IDIO_CFG = {}
+    return _IDIO_CFG
+
+
+def _detect_pure_technical_bias(
+    bundle: "IndicatorBundle",
+    macd_analysis: "MACDAnalysis | None",
+    bb_analysis: "BollingerAnalysis | None",
+    ts_result: "TotalScoreResult",
+    cfg: dict,
+) -> str | None:
+    """
+    Returns SIGNAL_BUY, SIGNAL_SELL, or None.
+
+    Fires when macro scenario is neutral but technicals show a clean
+    directional move (idiosyncratic / pure-technical mode).
+
+    Requirements:
+      1. TotalScore >= min_total_score
+      2. BB not in squeeze (move needs energy)
+      3. At least min_directional_agrees of MACD/Hi-Lo/ATRStop/SAR agree on one direction
+      4. RSI not in exhaustion zone for that direction
+    """
+    min_score   = cfg.get("min_total_score", 0.72)
+    min_agrees  = cfg.get("min_directional_agrees", 3)
+    rsi_max_long  = cfg.get("rsi_max_long",  75.0)
+    rsi_min_short = cfg.get("rsi_min_short", 25.0)
+
+    if ts_result.total_score < min_score:
+        return None
+
+    # BB not in squeeze
+    if bb_analysis:
+        if bb_analysis.is_squeeze:
+            return None
+    elif bundle.bollinger and bundle.bollinger.state == "squeeze":
+        return None
+
+    # Count directional agreement for each side
+    buy_agrees  = 0
+    sell_agrees = 0
+
+    # MACD
+    macd_dir = None
+    if macd_analysis:
+        macd_dir = macd_analysis.direction
+    elif bundle.macd:
+        macd_dir = bundle.macd.direction
+    if macd_dir == "bullish":
+        buy_agrees  += 1
+    elif macd_dir == "bearish":
+        sell_agrees += 1
+
+    # Hi-Lo
+    if bundle.hi_lo:
+        if bundle.hi_lo.direction == "bullish":
+            buy_agrees  += 1
+        elif bundle.hi_lo.direction == "bearish":
+            sell_agrees += 1
+
+    # ATR Stop
+    if bundle.atr_stop:
+        if bundle.atr_stop.direction == "bullish":
+            buy_agrees  += 1
+        elif bundle.atr_stop.direction == "bearish":
+            sell_agrees += 1
+
+    # SAR
+    if bundle.sar:
+        if bundle.sar.direction == "bullish":
+            buy_agrees  += 1
+        elif bundle.sar.direction == "bearish":
+            sell_agrees += 1
+
+    # Determine unambiguous bias
+    if buy_agrees >= min_agrees and buy_agrees > sell_agrees:
+        bias = SIGNAL_BUY
+    elif sell_agrees >= min_agrees and sell_agrees > buy_agrees:
+        bias = SIGNAL_SELL
+    else:
+        return None  # split or insufficient agreement
+
+    # RSI exhaustion check
+    rsi = getattr(bundle, "rsi", 50.0)
+    if bias == SIGNAL_BUY  and rsi >= rsi_max_long:
+        return None
+    if bias == SIGNAL_SELL and rsi <= rsi_min_short:
+        return None
+
+    return bias
 
 
 @dataclass
@@ -179,26 +283,44 @@ def generate(
         return base_signal
 
     # ── VETO 5: Scenario not directional ─────────────────────────────
+    pure_technical = False
+    pure_technical_bias: str | None = None
+
     if not scenario_result or scenario_result.scenario in (Scenario.UNDEFINED, Scenario.LATERAL, Scenario.BLOCKED):
-        rationale.append(f"Cenario nao direcional: {scenario_result.scenario if scenario_result else 'None'}")
-        base_signal.rationale = rationale
-        return base_signal
+        idio_cfg = _get_idio_config()
+        if idio_cfg.get("enabled", False):
+            pure_technical_bias = _detect_pure_technical_bias(
+                bundle, macd_analysis, bb_analysis, ts_result, idio_cfg
+            )
+        if pure_technical_bias:
+            pure_technical = True
+            base_signal.scenario = Scenario.TECNICO_PURO.value
+            rationale.append(f"[TECNICO_PURO] Movimento idiossincrático detectado: {pure_technical_bias}")
+            logger.debug(f"[{bundle.symbol}] TECNICO_PURO: bias={pure_technical_bias} ts={ts_result.total_score:.3f}")
+        else:
+            rationale.append(f"Cenario nao direcional: {scenario_result.scenario if scenario_result else 'None'}")
+            base_signal.rationale = rationale
+            return base_signal
 
-    # ── VETO 6: MTF no confluence ────────────────────────────────────
-    if mtf_result and mtf_result.confluence_label == "none":
-        rationale.append("MTF: sem confluencia — HOLD")
-        base_signal.rationale = rationale
-        return base_signal
+    # ── VETO 6: MTF no confluence (skipped in pure-technical mode) ───
+    if not pure_technical:
+        if mtf_result and mtf_result.confluence_label == "none":
+            rationale.append("MTF: sem confluencia — HOLD")
+            base_signal.rationale = rationale
+            return base_signal
 
-    # ── VETO 7: Higher TF veto ───────────────────────────────────────
+    # ── VETO 7: Higher TF veto (applies even in pure-technical mode) ─
     if mtf_result and mtf_result.higher_tf_veto:
         rationale.append("Higher TF veto: timeframe superior contradiz sinal")
         base_signal.rationale = rationale
         return base_signal
 
     # ── DETERMINE BIAS ───────────────────────────────────────────────
-    scenario_str = scenario_result.scenario.value
-    bias = SIGNAL_BUY if scenario_str == Scenario.BULL.value else SIGNAL_SELL
+    if pure_technical:
+        bias = pure_technical_bias  # type: ignore[assignment]
+    else:
+        scenario_str = scenario_result.scenario.value
+        bias = SIGNAL_BUY if scenario_str == Scenario.BULL.value else SIGNAL_SELL
 
     # ── COLLECT CONFIRMATIONS (8 conditions) ─────────────────────────
     confirms = 0
@@ -305,19 +427,28 @@ def generate(
             rationale.append(f"[-] Longe do preco justo: {dist_pct*100:.3f}%")
 
     # ── FINAL DECISION ─────────────────────────────────────────────────────
-    # Gate 1: technical confirmations (min 4/8)
-    # Gate 2: MTF confluence >= moderate
-    # Gate 3: TotalScore >= MODERATE threshold (0.55)
-    min_confirms = 4
-    ts_ok = ts_result.decision in ("execute", "moderate")
-    mtf_ok = mtf_result and mtf_result.confluence_score >= 0.50
+    # In pure-technical mode: elevated gates (5/8 confirms, TotalScore >= 0.72)
+    # MTF confluence not required (no macro context).
+    if pure_technical:
+        idio_cfg = _get_idio_config()
+        min_confirms = idio_cfg.get("min_confirmations", 5)
+        ts_ok = ts_result.total_score >= idio_cfg.get("min_total_score", 0.72)
+        mtf_ok = True  # MTF not required for idiosyncratic moves
+    else:
+        min_confirms = 4
+        ts_ok = ts_result.decision in ("execute", "moderate")
+        mtf_ok = mtf_result and mtf_result.confluence_score >= 0.50
 
     if confirms >= min_confirms and mtf_ok and ts_ok:
         final_signal = bias
-        # Confidence: technical + MTF + TotalScore
-        confidence = min(10, confirms
-                         + int((mtf_result.confluence_score if mtf_result else 0) * 3)
-                         + int(ts_result.total_score * 3))
+        raw_conf = (confirms
+                    + int((mtf_result.confluence_score if mtf_result else 0) * 3)
+                    + int(ts_result.total_score * 3))
+        if pure_technical:
+            idio_cfg = _get_idio_config()
+            confidence = min(idio_cfg.get("max_confidence", 7), raw_conf)
+        else:
+            confidence = min(10, raw_conf)
     else:
         final_signal = SIGNAL_HOLD
         confidence = confirms
@@ -331,12 +462,16 @@ def generate(
     # Layer 1: scenario lot penalty (correlation, VIX caution)
     # Layer 2: MTF confluence adjustment
     # Layer 3: TotalScore lot multiplier (from VES/ES analysis)
+    # Layer 4 (pure-technical only): idiosyncratic penalty (no macro = half size)
     lot_mult = 1.0
-    if scenario_result:
+    if scenario_result and not pure_technical:
         lot_mult *= scenario_result.lot_penalty
-    if mtf_result:
+    if mtf_result and not pure_technical:
         lot_mult *= mtf_result.lot_adjustment
-    lot_mult *= ts_result.lot_multiplier    # TotalScore-based adjustment
+    lot_mult *= ts_result.lot_multiplier
+    if pure_technical:
+        idio_cfg = _get_idio_config()
+        lot_mult *= idio_cfg.get("lot_penalty", 0.50)
     lot_mult = round(max(0.0, min(1.0, lot_mult)), 4)
 
     # ── CHART LEVELS ─────────────────────────────────────────────────

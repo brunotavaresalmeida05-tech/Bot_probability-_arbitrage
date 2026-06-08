@@ -24,11 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 class Scenario(str, Enum):
-    BULL       = "TENDENCIA_ALTA"
-    BEAR       = "TENDENCIA_BAIXA"
-    UNDEFINED  = "INDEFINIDO"
-    LATERAL    = "LATERAL"
-    BLOCKED    = "BLOQUEADO"
+    BULL          = "TENDENCIA_ALTA"
+    BEAR          = "TENDENCIA_BAIXA"
+    UNDEFINED     = "INDEFINIDO"
+    LATERAL       = "LATERAL"
+    BLOCKED       = "BLOQUEADO"
+    TECNICO_PURO  = "TECNICO_PURO"   # idiosyncratic: no macro context, strong technical move
 
 
 # Asset-to-DXY sensitivity (beta): how much DXY moves this asset

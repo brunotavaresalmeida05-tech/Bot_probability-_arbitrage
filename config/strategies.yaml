@@ -43,6 +43,16 @@ strategies:
       entry: M5
       context: M15
 
+  idiosyncratic_move:
+    enabled: true         # Opera movimentos tecnicos sem contexto macro
+    min_total_score: 0.72
+    lot_penalty: 0.50
+    min_confirmations: 5
+    min_directional_agrees: 3
+    rsi_max_long: 75.0
+    rsi_min_short: 25.0
+    max_confidence: 7
+
 # Filtros globais aplicados a todas as estratégias
 global_filters:
   adx_min_regime: 20

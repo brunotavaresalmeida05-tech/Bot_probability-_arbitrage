@@ -315,6 +315,8 @@ ALWAYS kill_switch global tem prioridade sobre todas as estratégias
 | 20 | Testes unitários Hi-Lo/ATR Stop/HCS | [ ] pendente | Dívida técnica alta |
 | 21 | Opportunity-Permission Engine | [x] done | src/engine/scanner.py — 2 fases separadas; spec em .ai/specs/opportunity-permission-engine.md |
 | 22 | RSI(14) no scanner | [x] done | rsi=50.0 neutro (sem efeito). Momentum +0.02, extremo mod -0.03/RS+0.07, extremo forte -0.06/RS+0.15. checks/rsi_report.py |
+| 23 | RSI Calibration Policy | [x] done | Peso dinâmico por classe×TF×vol_regime. config/rsi_calibration.yaml. Avaliação automática em checks/rsi_report.py --calibrate |
+| 24 | Idiosyncratic Move (TECNICO_PURO) | [x] done | Novo cenário: macro neutro + técnicos fortes (3/4 indicadores + TS>=0.72). Gates elevados: 5/8 confirms, lote×0.50, conf≤7. Activar/desactivar via config/strategies.yaml |
 
 ---
 
@@ -379,7 +381,7 @@ Estado operacional actual (2026-06-08):
   Bot: RUNNING (python -m src.main, dry_run=true)
   Sessão: Day 6 — janela de validação | sleep=90s (London/NY)
   Log: logs/bot_stderr_current.log (Start-Process com -RedirectStandardError)
-  Estratégias activas: trend_following + breakout_session
+  Estratégias activas: trend_following + breakout_session + idiosyncratic_move (TECNICO_PURO)
   Score Engine: TotalScore 7 componentes (MCS+BCS+HCS+VES+ES+CS+RS)
   Opportunity-Permission Engine: scanner.py [COMPLETO]
   HOJE (Day 6): stress_test.py T1-T6 obrigatório + daily_check.py + signal_report.py --hours 24
