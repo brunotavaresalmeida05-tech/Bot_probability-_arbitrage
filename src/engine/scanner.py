@@ -54,21 +54,30 @@ _PERM_BASE_TF: dict[str, float] = {
 }
 
 # ── Ajuste por classe de activo [opp_adj, perm_adj] ──────────────────────────
-# forex:      equilibrado — contexto macro e benchmark importantes
-# indices:    opp mais alto (precisa contexto claro), perm mais baixo se tendência forte
-# gold:       opp médio-alto, perm conservador (VIX/DXY contraditórios custam caro)
-# oil:        perm apertado em dias de notícia/inventory
-# treasuries: opp alto (movimentos silenciosos mas grandes), perm conservador
-# crypto:     opp baixo (reconhecer cedo), perm muito apertado (volatilidade explode)
+# perm_adj negativo = threshold mais baixo = mais fácil executar.
+# forex: reduzido -0.04 (era 0.00) — watchlist nunca convertia em EXECUTE
+# gold:  reduzido -0.04 (era +0.03) — idem; gold tem ES=0 e RS baixo; bloqueio era excessivo
+# indices/oil/crypto: conservadores — mantidos
 
 _CLASS_ADJ: dict[str, tuple[float, float]] = {
-    "forex":      ( 0.00,  0.00),
-    "indices":    ( 0.03, -0.02),
-    "gold":       ( 0.02,  0.03),
-    "oil":        ( 0.00,  0.04),
-    "treasuries": ( 0.04,  0.04),
-    "crypto":     (-0.04,  0.05),
-    "unknown":    ( 0.00,  0.00),
+    "forex":      ( 0.00, -0.04),   # era 0.00
+    "indices":    ( 0.03, -0.02),   # inalterado
+    "gold":       ( 0.02, -0.01),   # era +0.03
+    "oil":        ( 0.00,  0.04),   # inalterado
+    "treasuries": ( 0.04,  0.04),   # inalterado
+    "crypto":     (-0.04,  0.05),   # inalterado
+    "unknown":    ( 0.00,  0.00),   # inalterado
+}
+
+# ── Ajuste por sessão de mercado (aplicado ao perm_threshold) ─────────────────
+# London/NY overlap: threshold mais permissivo — maior liquidez, sinal mais limpo
+# Asia/Sydney:       threshold mais apertado — baixa liquidez, ruído estrutural
+_SESSION_PERM_ADJ: dict[str, float] = {
+    "london_ny_overlap": -0.02,   # melhor sessão
+    "london":            -0.01,   # boa sessão
+    "new_york":           0.00,   # base
+    "asia":              +0.05,   # baixa liquidez
+    "sydney":            +0.06,   # muito baixa liquidez
 }
 
 # ── Vetos de risco (independentes dos thresholds) ────────────────────────────
@@ -107,6 +116,7 @@ class CalibrationResult:
     adj_class_perm: float
     adj_vol:        float
     adj_risk:       float
+    adj_session:    float = 0.0   # ajuste por sessão de mercado
 
 
 @dataclass
@@ -147,15 +157,17 @@ def get_thresholds(
     timeframe:   str,
     vix:         float = 20.0,
     rs:          float = 0.0,
+    session:     str   = "new_york",
 ) -> CalibrationResult:
     """
-    Calcula thresholds calibrados para um asset/TF.
+    Calcula thresholds calibrados para um asset/TF/sessão.
 
     Opp_threshold  = BaseOpp_tf  + AdjOpp_class  + AdjOpp_vol
-    Perm_threshold = BasePerm_tf + AdjPerm_class + AdjPerm_risk
+    Perm_threshold = BasePerm_tf + AdjPerm_class + AdjPerm_risk + AdjPerm_session
 
-    VIX alto  → sobe opp threshold (mais ruído = precisa mais qualidade)
-    RS alto   → sobe perm threshold (mais risco = permissão mais apertada)
+    VIX alto   → sobe opp threshold (mais ruído = precisa mais qualidade)
+    RS alto    → sobe perm threshold (mais risco = permissão mais apertada)
+    Session    → London/NY abre; Asia fecha (liquidez estrutural)
     """
     opp_base  = _OPP_BASE_TF.get(timeframe,  _OPP_BASE_TF["M15"])
     perm_base = _PERM_BASE_TF.get(timeframe, _PERM_BASE_TF["M15"])
@@ -184,8 +196,11 @@ def get_thresholds(
     else:
         adj_risk = 0.0
 
-    opp_threshold  = round(opp_base  + adj_opp_class  + adj_vol,  3)
-    perm_threshold = round(perm_base + adj_perm_class + adj_risk, 3)
+    # Adj_session: liquidez estrutural por sessão
+    adj_session = _SESSION_PERM_ADJ.get(session, 0.0)
+
+    opp_threshold  = round(opp_base  + adj_opp_class  + adj_vol,                       3)
+    perm_threshold = round(perm_base + adj_perm_class + adj_risk + adj_session,         3)
 
     return CalibrationResult(
         asset_class=asset_class,
@@ -198,39 +213,51 @@ def get_thresholds(
         adj_class_perm=adj_perm_class,
         adj_vol=adj_vol,
         adj_risk=adj_risk,
+        adj_session=adj_session,
     )
 
 
 # ── RSI helpers ───────────────────────────────────────────────────────────────
 
-def _rsi_opp_adj(rsi: float) -> float:
+def _rsi_opp_adj(rsi: float, weight: float = 1.0) -> float:
     """
-    Ajuste plano ao OpportunityScore baseado na zona de RSI.
-    50.0 (neutro por defeito) → 0.0 (sem efeito, compatibilidade total).
-    Zona momentum (30-45 ou 55-70): sinal activo sem exaustão → +0.02.
-    Extremo moderado (>75 ou <25): risco de exaustão → -0.03.
-    Extremo forte (>80 ou <20): exaustão iminente → -0.06.
+    Ajuste ao OpportunityScore baseado na zona de RSI × peso de calibração.
+
+    rsi=50.0 (neutro por defeito) → 0.0 (sem efeito, compatibilidade total).
+    weight=1.0 → efeito total; weight=0.0 → RSI desligado nesta classe/TF/regime.
+
+    Zona momentum (30-45 ou 55-70): +0.02 × weight
+    Extremo moderado (>75 ou <25):  -0.03 × weight
+    Extremo forte (>80 ou <20):     -0.06 × weight
     """
+    if weight <= 0.0:
+        return 0.0
     if rsi >= _RSI_EXTREME_STRONG[0] or rsi <= _RSI_EXTREME_STRONG[1]:
-        return -0.06
-    if rsi >= _RSI_EXTREME_MOD[0] or rsi <= _RSI_EXTREME_MOD[1]:
-        return -0.03
-    if ((_RSI_MOMENTUM_HIGH[0] <= rsi <= _RSI_MOMENTUM_HIGH[1]) or
+        base = -0.06
+    elif rsi >= _RSI_EXTREME_MOD[0] or rsi <= _RSI_EXTREME_MOD[1]:
+        base = -0.03
+    elif ((_RSI_MOMENTUM_HIGH[0] <= rsi <= _RSI_MOMENTUM_HIGH[1]) or
             (_RSI_MOMENTUM_LOW[0] <= rsi <= _RSI_MOMENTUM_LOW[1])):
-        return +0.02
-    return 0.0   # zona neutra 45-55
+        base = +0.02
+    else:
+        base = 0.0   # zona neutra 45-55
+    return base * weight
 
 
-def _rsi_perm_penalty(rsi: float) -> float:
+def _rsi_perm_penalty(rsi: float, weight: float = 1.0) -> float:
     """
-    Penalidade adicional ao RS no PermissionScore quando RSI indica exaustão.
-    Aplicada sobre o RS existente antes de calcular o score.
+    Penalidade adicional ao RS no PermissionScore × peso de calibração.
+    weight=0.0 → RSI desligado: sem penalidade independente do valor RSI.
     """
+    if weight <= 0.0:
+        return 0.0
     if rsi >= _RSI_EXTREME_STRONG[0] or rsi <= _RSI_EXTREME_STRONG[1]:
-        return 0.15
-    if rsi >= _RSI_EXTREME_MOD[0] or rsi <= _RSI_EXTREME_MOD[1]:
-        return 0.07
-    return 0.0
+        base = 0.15
+    elif rsi >= _RSI_EXTREME_MOD[0] or rsi <= _RSI_EXTREME_MOD[1]:
+        base = 0.07
+    else:
+        base = 0.0
+    return base * weight
 
 
 # ── OpportunityScore ──────────────────────────────────────────────────────────
@@ -242,15 +269,15 @@ def compute_opportunity_score(
     ves: float,
     es:  float,
     opp_threshold: float = 0.33,
-    rsi: float = 50.0,
+    rsi:        float = 50.0,
+    rsi_weight: float = 1.0,
 ) -> tuple[float, str]:
     """
-    OpportunityScore = a1*MCS + a2*BCS + a3*HCS + a4*VES - a5*ES + rsi_adj
+    OpportunityScore = a1*MCS + a2*BCS + a3*HCS + a4*VES - a5*ES + rsi_adj*rsi_weight
 
-    rsi=50.0 (neutro): sem efeito — comportamento idêntico ao anterior.
-    Zona momentum (30-45 ou 55-70): +0.02.
-    Extremo moderado (>75 ou <25): -0.03.
-    Extremo forte (>80 ou <20): -0.06.
+    rsi=50.0 → sem efeito (neutro, retrocompatível).
+    rsi_weight=0.0 → RSI desligado (política de calibração).
+    rsi_weight=1.0 → efeito total (padrão).
 
     Label calibrado:
       >= opp_threshold * STRONG_MULT → "strong"
@@ -258,7 +285,7 @@ def compute_opportunity_score(
       <  opp_threshold               → "weak"
     """
     a1, a2, a3, a4, a5 = _OPP_WEIGHTS
-    raw   = a1 * mcs + a2 * bcs + a3 * hcs + a4 * ves - a5 * es + _rsi_opp_adj(rsi)
+    raw   = a1 * mcs + a2 * bcs + a3 * hcs + a4 * ves - a5 * es + _rsi_opp_adj(rsi, rsi_weight)
     score = float(np.clip(raw, 0.0, 1.0))
 
     strong_thr = opp_threshold * _STRONG_MULTIPLIER
@@ -307,20 +334,19 @@ def compute_permission_score(
     blackout:       bool  = False,
     perm_threshold: float = 0.27,
     rsi:            float = 50.0,
+    rsi_weight:     float = 1.0,
 ) -> PermissionResult:
     """
     PermissionScore = b1*CS - b2*RS_eff - b3*ES + b4*ATRFit
 
-    RSI extremo adiciona penalidade ao RS antes do cálculo:
-      RSI >80 ou <20 → RS += 0.15
-      RSI >75 ou <25 → RS += 0.07
-      rsi=50.0 (neutro) → sem efeito — comportamento idêntico ao anterior.
+    RS_eff = RS + rsi_perm_penalty(rsi) * rsi_weight
+    rsi_weight=0.0 → sem penalidade RSI (RSI desligado por política de calibração).
 
     CONFIRM = perm_threshold * 0.70
     REDUCE  = perm_threshold * 0.40
     """
     b1, b2, b3, b4 = _PERM_WEIGHTS
-    rs_eff = min(rs + _rsi_perm_penalty(rsi), 1.0)
+    rs_eff = min(rs + _rsi_perm_penalty(rsi, rsi_weight), 1.0)
     raw    = b1 * cs - b2 * rs_eff - b3 * es + b4 * atr_fit
     score  = float(np.clip(raw, 0.0, 1.0))
 
@@ -377,17 +403,27 @@ def build_opportunity(
     vix:          float = 20.0,
     rs:           float = 0.0,
     rsi:          float = 50.0,
+    vol_regime:   str = "normal",
+    session:      str = "new_york",
     notes:        list[str] | None = None,
 ) -> OpportunityResult:
     """
-    Constrói OpportunityResult com thresholds calibrados para este asset/TF.
+    Constrói OpportunityResult com thresholds calibrados para este asset/TF/sessão.
+
     rsi=50.0 (neutro por defeito) → sem efeito no score.
+    vol_regime determina o peso RSI via RSICalibrationPolicy.
+    session determina adj_session no perm_threshold.
     """
-    cal   = get_thresholds(asset_class, timeframe, vix=vix, rs=rs)
+    from src.engine.rsi_calibration import get_policy
+    rsi_weight = get_policy().get_weight(asset_class, timeframe, vol_regime)
+
+    cal   = get_thresholds(asset_class, timeframe, vix=vix, rs=rs, session=session)
     score, label = compute_opportunity_score(mcs, bcs, hcs, ves, es,
                                               opp_threshold=cal.opp_threshold,
-                                              rsi=rsi)
-    rsi_note = f"rsi={rsi:.1f}" if rsi != 50.0 else ""
+                                              rsi=rsi,
+                                              rsi_weight=rsi_weight)
+
+    rsi_note = f"rsi={rsi:.1f} w={rsi_weight:.2f}" if rsi != 50.0 else ""
     base_note = f"cal={cal.opp_threshold:.3f}/{cal.perm_threshold:.3f}"
     return OpportunityResult(
         symbol=symbol,

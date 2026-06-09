@@ -186,6 +186,7 @@ class Orchestrator:
                 asset_class=asset_class,
                 vix=vix_now,
                 rs=sig.rs,
+                session=session.primary if hasattr(session, "primary") else "new_york",
             )
             opp.notes.append(f"atr_fit={atr_fit_val:.3f}")
             opportunities.append(opp)
