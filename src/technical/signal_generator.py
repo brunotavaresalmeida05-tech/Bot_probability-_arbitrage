@@ -34,6 +34,8 @@ from src.technical.multi_timeframe import MTFResult
 from src.analysis.scenario_evaluator import ScenarioResult, Scenario
 from src.analysis.total_score import compute as compute_total_score, TotalScoreResult, describe_score
 from src.macro.macro_context import MacroContext
+from src.engine import regime_router as _regime
+from src.engine.regime_router import RegimeState
 
 import logging
 logger = logging.getLogger(__name__)
@@ -282,11 +284,37 @@ def generate(
         base_signal.blocked_reason = scenario_result.blocked_reason
         return base_signal
 
-    # ── VETO 5: Scenario not directional ─────────────────────────────
-    pure_technical = False
+    # ── VETO 5: Scenario not directional → V9.1: check regime before blocking ─
+    pure_technical  = False
+    trending_regime = False
     pure_technical_bias: str | None = None
+    regime_result = _regime.detect(bundle, macro)
 
-    if not scenario_result or scenario_result.scenario in (Scenario.UNDEFINED, Scenario.LATERAL, Scenario.BLOCKED):
+    macro_directional = (
+        scenario_result is not None
+        and scenario_result.scenario in (Scenario.BULL, Scenario.BEAR)
+    )
+
+    if macro_directional:
+        pass  # macro provides clear direction — proceed to confirmations
+    elif regime_result.state in (RegimeState.TRENDING_UP, RegimeState.TRENDING_DOWN):
+        # V9.1: trending regime — macro=neutral is NOT a veto
+        pure_technical  = True
+        trending_regime = True
+        pure_technical_bias = (
+            SIGNAL_BUY if regime_result.direction == "bullish" else SIGNAL_SELL
+        )
+        base_signal.scenario = regime_result.state.value
+        rationale.append(
+            f"[TRENDING] ADX={regime_result.adx:.1f} dir={regime_result.direction} "
+            f"conf={regime_result.confidence:.2f} lot_ctx={regime_result.lot_context:.2f}"
+        )
+        logger.debug(
+            f"[{bundle.symbol}] TRENDING regime: {regime_result.state} "
+            f"adx={regime_result.adx:.1f} lot_ctx={regime_result.lot_context:.2f}"
+        )
+    else:
+        # RANGING or VOLATILE — try TECNICO_PURO, else HOLD
         idio_cfg = _get_idio_config()
         if idio_cfg.get("enabled", False):
             pure_technical_bias = _detect_pure_technical_bias(
@@ -295,10 +323,13 @@ def generate(
         if pure_technical_bias:
             pure_technical = True
             base_signal.scenario = Scenario.TECNICO_PURO.value
-            rationale.append(f"[TECNICO_PURO] Movimento idiossincrático detectado: {pure_technical_bias}")
-            logger.debug(f"[{bundle.symbol}] TECNICO_PURO: bias={pure_technical_bias} ts={ts_result.total_score:.3f}")
+            rationale.append(f"[TECNICO_PURO] Movimento idiossincrático: {pure_technical_bias}")
+            logger.debug(f"[{bundle.symbol}] TECNICO_PURO: ts={ts_result.total_score:.3f}")
         else:
-            rationale.append(f"Cenario nao direcional: {scenario_result.scenario if scenario_result else 'None'}")
+            rationale.append(
+                f"Cenario nao direcional: regime={regime_result.state} adx={regime_result.adx:.1f} "
+                f"scenario={scenario_result.scenario if scenario_result else 'None'}"
+            )
             base_signal.rationale = rationale
             return base_signal
 
@@ -427,13 +458,19 @@ def generate(
             rationale.append(f"[-] Longe do preco justo: {dist_pct*100:.3f}%")
 
     # ── FINAL DECISION ─────────────────────────────────────────────────────
-    # In pure-technical mode: elevated gates (5/8 confirms, TotalScore >= 0.72)
-    # MTF confluence not required (no macro context).
-    if pure_technical:
+    # Gate selection by mode:
+    #   TRENDING  (V9.1) — 3/8 confirms, TotalScore=context, only H1 veto applies
+    #   TECNICO_PURO     — 5/8 confirms, TotalScore >= 0.72, MTF not required
+    #   Normal macro     — 4/8 confirms, TotalScore execute/moderate, MTF >= 0.50
+    if pure_technical and trending_regime:
+        min_confirms = 3
+        ts_ok = True
+        mtf_ok = not (mtf_result and mtf_result.higher_tf_veto)
+    elif pure_technical:
         idio_cfg = _get_idio_config()
         min_confirms = idio_cfg.get("min_confirmations", 5)
         ts_ok = ts_result.total_score >= idio_cfg.get("min_total_score", 0.72)
-        mtf_ok = True  # MTF not required for idiosyncratic moves
+        mtf_ok = True
     else:
         min_confirms = 4
         ts_ok = ts_result.decision in ("execute", "moderate")
@@ -444,7 +481,9 @@ def generate(
         raw_conf = (confirms
                     + int((mtf_result.confluence_score if mtf_result else 0) * 3)
                     + int(ts_result.total_score * 3))
-        if pure_technical:
+        if pure_technical and trending_regime:
+            confidence = min(8, raw_conf)
+        elif pure_technical:
             idio_cfg = _get_idio_config()
             confidence = min(idio_cfg.get("max_confidence", 7), raw_conf)
         else:
@@ -458,20 +497,24 @@ def generate(
             f"ts={ts_result.total_score:.3f}({ts_result.decision})"
         )
 
-    # ── LOT MULTIPLIER (3 layers) ─────────────────────────────────────────
-    # Layer 1: scenario lot penalty (correlation, VIX caution)
-    # Layer 2: MTF confluence adjustment
-    # Layer 3: TotalScore lot multiplier (from VES/ES analysis)
-    # Layer 4 (pure-technical only): idiosyncratic penalty (no macro = half size)
+    # ── LOT MULTIPLIER ─────────────────────────────────────────────────────
+    # TRENDING:    regime.lot_context (VIX-adjusted) × TotalScore
+    # TECNICO_PURO: TotalScore × idio lot_penalty (half size, no macro)
+    # Normal:       scenario.lot_penalty × MTF.lot_adjustment × TotalScore
     lot_mult = 1.0
-    if scenario_result and not pure_technical:
-        lot_mult *= scenario_result.lot_penalty
-    if mtf_result and not pure_technical:
-        lot_mult *= mtf_result.lot_adjustment
-    lot_mult *= ts_result.lot_multiplier
-    if pure_technical:
+    if pure_technical and trending_regime:
+        lot_mult *= regime_result.lot_context
+        lot_mult *= ts_result.lot_multiplier
+    elif pure_technical:
+        lot_mult *= ts_result.lot_multiplier
         idio_cfg = _get_idio_config()
         lot_mult *= idio_cfg.get("lot_penalty", 0.50)
+    else:
+        if scenario_result:
+            lot_mult *= scenario_result.lot_penalty
+        if mtf_result:
+            lot_mult *= mtf_result.lot_adjustment
+        lot_mult *= ts_result.lot_multiplier
     lot_mult = round(max(0.0, min(1.0, lot_mult)), 4)
 
     # ── CHART LEVELS ─────────────────────────────────────────────────

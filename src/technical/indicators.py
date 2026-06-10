@@ -107,6 +107,7 @@ class IndicatorBundle:
     weis_wave: float = 0.0  # cumulative volume delta (Weis Wave proxy)
     atr: float = 0.0
     rsi: float = 50.0       # RSI(14); 50.0 = neutro por defeito
+    adx: float = 20.0       # ADX(14); 20.0 = neutro por defeito
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +374,52 @@ def weis_wave(closes: pd.Series, volumes: pd.Series, period: int = 3) -> float:
     return round(float(wave.iloc[-1]), 2)
 
 
+def adx_indicator(
+    highs: pd.Series,
+    lows: pd.Series,
+    closes: pd.Series,
+    period: int = 14,
+) -> float:
+    """Average Directional Index (Wilder, 14-period). Returns 20.0 if insufficient data."""
+    if len(closes) < period * 2 + 5:
+        return 20.0
+
+    prev_high  = highs.shift(1)
+    prev_low   = lows.shift(1)
+    prev_close = closes.shift(1)
+
+    up_move   = highs - prev_high
+    down_move = prev_low - lows
+
+    plus_dm  = pd.Series(
+        np.where((up_move > down_move) & (up_move > 0), up_move, 0.0),
+        index=closes.index,
+    )
+    minus_dm = pd.Series(
+        np.where((down_move > up_move) & (down_move > 0), down_move, 0.0),
+        index=closes.index,
+    )
+
+    tr = pd.concat([
+        highs - lows,
+        (highs - prev_close).abs(),
+        (lows  - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    tr_s       = tr.ewm(com=period - 1, adjust=False).mean()
+    plus_dm_s  = plus_dm.ewm(com=period - 1, adjust=False).mean()
+    minus_dm_s = minus_dm.ewm(com=period - 1, adjust=False).mean()
+
+    plus_di  = 100.0 * plus_dm_s  / tr_s.replace(0, np.nan)
+    minus_di = 100.0 * minus_dm_s / tr_s.replace(0, np.nan)
+
+    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    adx_series = dx.ewm(com=period - 1, adjust=False).mean()
+
+    last = adx_series.iloc[-1]
+    return round(float(last), 2) if not np.isnan(last) else 20.0
+
+
 def rsi_14(closes: pd.Series, period: int = 14) -> float:
     """
     RSI(14) via Wilder smoothing (EWM com=period-1).
@@ -431,6 +478,7 @@ def compute_bundle(
     bundle.weis_wave = weis_wave(closes, volumes)
     bundle.atr = atr(highs, lows, closes)
     bundle.rsi = rsi_14(closes)
+    bundle.adx = adx_indicator(highs, lows, closes)
 
     if prev_session_high and prev_session_low and prev_session_close:
         bundle.pivot = pivot_points(prev_session_high, prev_session_low, prev_session_close)

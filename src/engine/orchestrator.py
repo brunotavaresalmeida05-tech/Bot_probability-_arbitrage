@@ -54,6 +54,8 @@ from src.session.prep_workflow import PrepWorkflow
 from src.execution.order_manager import OrderManager
 from src.risk.professional_risk import ProfessionalRiskManager
 from src.benchmark.portfolio_monitor import BenchmarkPortfolioMonitor
+from src.engine.circuit_breaker import CircuitBreaker, CBLevel
+from src.engine import regime_router as _regime_mod
 from src.engine.scanner import (
     build_opportunity, scan,
     compute_permission_score, calc_atr_fit,
@@ -113,6 +115,8 @@ class Orchestrator:
         self._watchlist: list[dict] = []
         self._perm_results: dict[str, str] = {}
         self._metrics = ScannerMetrics()
+        self._cb = CircuitBreaker()
+        self._last_regime: dict = {"state": "UNKNOWN", "direction": "neutral", "adx": 20.0, "lot_context": 1.0}
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -138,7 +142,9 @@ class Orchestrator:
 
     def update_account(self, info):
         try:
-            self._risk.update_account(float(info.balance), float(info.equity))
+            equity = float(info.equity)
+            self._risk.update_account(float(info.balance), equity)
+            self._cb.set_session_equity(equity)
         except Exception:
             pass
 
@@ -284,6 +290,34 @@ class Orchestrator:
                 )
 
         self._metrics.end_cycle(self._cycle)
+
+        # ── Capture representative regime for state output ───────────────────
+        first_bundle = next(
+            (b for tf_map in self._bundles.values() for b in tf_map.values()),
+            None,
+        )
+        if first_bundle is not None:
+            rr = _regime_mod.detect(first_bundle, self.macro)
+            self._last_regime = {
+                "state":       rr.state.value,
+                "direction":   rr.direction,
+                "adx":         rr.adx,
+                "confidence":  rr.confidence,
+                "lot_context": rr.lot_context,
+            }
+
+        # ── Circuit breaker check ────────────────────────────────────────────
+        cb_state = self._cb.update(current_equity=self._risk.state.equity)
+        if cb_state.level >= CBLevel.RED:
+            logger.error(f"[CB] RED — all entries halted. rationale={cb_state.rationale}")
+            signals = []
+        elif cb_state.level >= CBLevel.ORANGE:
+            logger.warning(f"[CB] ORANGE — no new entries. rationale={cb_state.rationale}")
+            signals = []
+        elif cb_state.level == CBLevel.YELLOW:
+            logger.warning(f"[CB] YELLOW — lot_mult×0.5. rationale={cb_state.rationale}")
+            for sig in signals:
+                sig.lot_multiplier *= cb_state.lot_multiplier
 
         # ── Phase 4: execute — risk gate → order manager ─────────────────────
         for sig in signals:
@@ -511,6 +545,7 @@ class Orchestrator:
                     "symbol": s.symbol,
                     "timeframe": s.timeframe,
                     "signal": s.signal,
+                    "scenario": getattr(s, "scenario", "indefinido"),
                     "confidence": s.confidence,
                     "lot_multiplier": s.lot_multiplier,
                     "entry": s.entry,
@@ -541,6 +576,15 @@ class Orchestrator:
                 "daily_pnl": round(self._risk.state.daily_pnl, 2),
                 "tier": self._risk.state.tier,
                 "lot_multiplier": self.macro.lot_multiplier(),
+            },
+            "regime": self._last_regime,
+            "circuit_breaker": {
+                "level": str(self._cb.state.level),
+                "daily_drawdown": round(self._cb.state.daily_drawdown, 4),
+                "consecutive_losses": self._cb.state.consecutive_losses,
+                "can_open": self._cb.state.can_open,
+                "lot_multiplier": self._cb.state.lot_multiplier,
+                "rationale": self._cb.state.rationale,
             },
             "benchmark": bench,
             "scanner_metrics": self._metrics.snapshot(),

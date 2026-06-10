@@ -317,6 +317,16 @@ ALWAYS kill_switch global tem prioridade sobre todas as estratégias
 | 22 | RSI(14) no scanner | [x] done | rsi=50.0 neutro (sem efeito). Momentum +0.02, extremo mod -0.03/RS+0.07, extremo forte -0.06/RS+0.15. checks/rsi_report.py |
 | 23 | RSI Calibration Policy | [x] done | Peso dinâmico por classe×TF×vol_regime. config/rsi_calibration.yaml. Avaliação automática em checks/rsi_report.py --calibrate |
 | 24 | Idiosyncratic Move (TECNICO_PURO) | [x] done | Novo cenário: macro neutro + técnicos fortes (3/4 indicadores + TS>=0.72). Gates elevados: 5/8 confirms, lote×0.50, conf≤7. Activar/desactivar via config/strategies.yaml |
+| 25 | Regime Router V9.1 | [x] done | src/engine/regime_router.py — TRENDING_UP/DOWN/RANGING/VOLATILE; ADX+MA+indicators; macro=contexto(lot_context); integrado em signal_generator VETO 5 |
+| 26 | Confluência 3/5 (TRENDING mode) | [x] done | signal_generator: TRENDING→3/8 confirms+lot_context; TECNICO_PURO→5/8; Normal→4/8 |
+| 33 | Circuit Breaker 4 níveis | [x] done | src/engine/circuit_breaker.py — GREEN/YELLOW(lot×0.5)/ORANGE/RED; DD e streak triggers; integrado orchestrator |
+| 34 | ADX(14) no IndicatorBundle | [x] done | indicators.py: adx_indicator() Wilder EWM; default=20.0; usado pelo regime_router |
+| 27 | SMC Layer | [ ] planned | src/analysis/smc.py — Order Blocks, FVG, BOS/ChoCh, Liquidity Sweeps |
+| 28 | Capital Manager V2 | [ ] planned | src/risk/capital_manager.py — 3 camadas (70/20/10) + Kelly/4 sizing + rebalanceamento mensal |
+| 29 | Margin Manager | [ ] planned | src/risk/margin_manager.py — semáforo 5 níveis (>500% verde → <150% crítico) |
+| 30 | TP Escalonado 40/35/25% | [ ] planned | Upgrade order_manager.py — TP1 40%+BE, TP2 35%+trailing ATR×1.0, TP3 25% runner |
+| 31 | Circuit Breaker 4 Níveis | [ ] planned | src/engine/circuit_breaker.py — ALERTA/REDUÇÃO/PAUSA/PARAGEM TOTAL |
+| 32 | ML Filter | [ ] planned | src/analysis/ml_filter.py — RandomForest quality classifier. Fase 10 (após 200+ trades V9.1) |
 
 ---
 
@@ -377,17 +387,18 @@ ALWAYS usar python -m src.main (NUNCA python src/main.py).
 NEVER mexer em estratégias desligadas sem instruções explícitas.
 ALWAYS declarar qual skill está a usar e porquê.
 
-Estado operacional actual (2026-06-08):
-  Bot: RUNNING (python -m src.main, dry_run=true)
-  Sessão: Day 6 — janela de validação | sleep=90s (London/NY)
-  Log: logs/bot_stderr_current.log (Start-Process com -RedirectStandardError)
-  Estratégias activas: trend_following + breakout_session + idiosyncratic_move (TECNICO_PURO)
-  Score Engine: TotalScore 7 componentes (MCS+BCS+HCS+VES+ES+CS+RS)
-  Opportunity-Permission Engine: scanner.py [COMPLETO]
-  HOJE (Day 6): stress_test.py T1-T6 obrigatório + daily_check.py + signal_report.py --hours 24
-  Próximo milestone: Day 7 (2026-06-09/10) → week_validator.py → AVANÇAR/MANTER/PAUSAR
-  Dívida alta: testes unitários Hi-Lo + ATR Stop + HCS + Opportunity-Permission
+Estado operacional actual (2026-06-10):
+  Bot: PARADO — ultimo ciclo: cycle=199 (2026-06-09T19:19Z, NY session)
+  Fase 8: COMPLETA — veredicto: AVANCAR para V9.1 (signals=0 estrutural confirmado)
+  Fase 9A: EM CURSO — Tasks 9A.1-9A.5 concluidas; pendente: 9A.6 (day0_reset nova janela)
+  Implementados: regime_router.py + circuit_breaker.py + ADX no IndicatorBundle
+  signal_generator.py: VETO 5 reescrito — TRENDING (ADX>=25) bypassa macro=neutral
+  state.json: inclui agora "regime" + "circuit_breaker" + "scenario" por sinal
+  Testes: 43 PASS (test_regime_router.py + test_circuit_breaker.py)
+  Bug corrigido: CircuitBreaker._date="" causava daily_start_equity override na 1a update()
+  Proximo passo: day0_reset.py + arrancar bot V9.1 + validar signals>0 em regime TRENDING
+  Divida critica restante: SMC Layer (9B), Capital Manager V2 (9C), Dashboard V9 (9D)
   server/: FastAPI + WebSockets (uvicorn server.main:app) — serve dashboard/ como static
-  app/: módulo legado de comparação de backtest (não é o engine live)
+  app/: modulo legado de comparacao de backtest (nao e o engine live)
   ROADMAP.md: ficheiro vivo de planificacao — actualizar sempre que nova integracao discutida
 ```
