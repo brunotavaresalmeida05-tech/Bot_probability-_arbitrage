@@ -5,12 +5,11 @@ TotalScore Engine — V9
 Master scoring system combining 7 components per asset per timeframe.
 Implements the full mathematical model from the trading methodology:
 
-  TotalScore = wm*MCS_n + wb*BCS_n + wh*HCS_n + wv*VES_n - we*ES_n + wc*CS_n - wr*RS_n
+  TotalScore = wm*MCS_n + wb*BCS_n + wv*VES_n - we*ES_n + wc*CS_n - wr*RS_n
 
 Camada principal (base da decisão técnica):
-  MCS: MACD Completion Score    — momentum, direção e movimento por cumprir
+  MCS: MACD Completion Score    — momentum, divergências e movimento por cumprir
   BCS: Bollinger Completion Score — compressão, expansão e extremos de volatilidade
-  HCS: Hi-Lo Completion Score   — range da sessão e pontos por cumprir
 
 Camada de expansão / exaustão:
   VES: Volatility Expansion Score — MCS + BCS + ATR expansion + volume surge
@@ -51,25 +50,26 @@ from src.macro.macro_context import MacroContext
 
 # ── Weight Tables ──────────────────────────────────────────────────────────
 
-# Weights by asset class [MCS, BCS, HCS, VES, ES, CS, RS]
+# Weights by asset class [MCS, BCS, VES, ES, CS, RS]
+# HCS removed (Hi-Lo Activator retired); weight redistributed to BCS and VES.
 _CLASS_WEIGHTS: dict[str, tuple[float, ...]] = {
-    "forex":      (0.24, 0.20, 0.14, 0.16, 0.12, 0.09, 0.05),
-    "indices":    (0.26, 0.18, 0.14, 0.18, 0.12, 0.08, 0.04),
-    "gold":       (0.22, 0.22, 0.14, 0.16, 0.14, 0.08, 0.04),
-    "oil":        (0.20, 0.22, 0.14, 0.18, 0.14, 0.08, 0.04),
-    "treasuries": (0.18, 0.20, 0.14, 0.16, 0.18, 0.09, 0.05),
-    "crypto":     (0.28, 0.18, 0.12, 0.20, 0.10, 0.06, 0.06),
-    "unknown":    (0.22, 0.20, 0.14, 0.18, 0.12, 0.08, 0.06),
+    "forex":      (0.26, 0.24, 0.20, 0.12, 0.12, 0.06),
+    "indices":    (0.28, 0.24, 0.22, 0.12, 0.08, 0.06),
+    "gold":       (0.24, 0.28, 0.20, 0.14, 0.08, 0.06),
+    "oil":        (0.22, 0.28, 0.22, 0.14, 0.08, 0.06),
+    "treasuries": (0.20, 0.26, 0.20, 0.18, 0.10, 0.06),
+    "crypto":     (0.28, 0.24, 0.24, 0.10, 0.07, 0.07),
+    "unknown":    (0.24, 0.26, 0.22, 0.12, 0.10, 0.06),
 }
 
-# Weights by timeframe [MCS, BCS, HCS, VES, ES, CS, RS]
+# Weights by timeframe [MCS, BCS, VES, ES, CS, RS]
 _TF_WEIGHTS: dict[str, tuple[float, ...]] = {
-    "M3":  (0.18, 0.24, 0.14, 0.22, 0.12, 0.06, 0.04),
-    "M5":  (0.22, 0.22, 0.12, 0.20, 0.12, 0.08, 0.04),
-    "M10": (0.24, 0.22, 0.12, 0.19, 0.12, 0.07, 0.04),
-    "M15": (0.26, 0.20, 0.12, 0.18, 0.12, 0.08, 0.04),
-    "M30": (0.28, 0.18, 0.12, 0.16, 0.14, 0.08, 0.04),
-    "H1":  (0.30, 0.16, 0.12, 0.14, 0.16, 0.08, 0.04),
+    "M3":  (0.20, 0.30, 0.26, 0.12, 0.07, 0.05),
+    "M5":  (0.24, 0.28, 0.24, 0.12, 0.08, 0.04),
+    "M10": (0.26, 0.27, 0.22, 0.12, 0.09, 0.04),
+    "M15": (0.28, 0.24, 0.22, 0.12, 0.10, 0.04),
+    "M30": (0.30, 0.22, 0.20, 0.14, 0.10, 0.04),
+    "H1":  (0.32, 0.20, 0.18, 0.16, 0.10, 0.04),
 }
 
 _ALPHA = 0.60   # weight of class in combined weight
@@ -95,7 +95,7 @@ def _normalize(value: float, center: float = 0.0, scale: float = 1.0) -> float:
 
 
 def _combined_weights(asset_class: str, timeframe: str) -> tuple[float, ...]:
-    """Compute final weights: 60% class + 40% timeframe. Returns (wm, wb, wh, wv, we, wc, wr)."""
+    """Compute final weights: 60% class + 40% timeframe. Returns (wm, wb, wv, we, wc, wr)."""
     cls_w = _CLASS_WEIGHTS.get(asset_class, _CLASS_WEIGHTS["unknown"])
     tf_w  = _TF_WEIGHTS.get(timeframe, _TF_WEIGHTS["M15"])
     return tuple(_ALPHA * c + _BETA * t for c, t in zip(cls_w, tf_w))
@@ -125,29 +125,6 @@ def _macd_completion_score(
     if macd.momentum == "decelerating":
         raw *= 0.7
     return float(np.clip(raw, 0.0, 3.0))
-
-
-def _hi_lo_completion_score(bundle: IndicatorBundle) -> float:
-    """
-    HCS: Hi-Lo Completion Score.
-    Measures remaining session range and trend conviction from the Hi-Lo Activator.
-    High HCS = price well inside the trend with range still to complete.
-    """
-    hi_lo = bundle.hi_lo
-    if not hi_lo:
-        return 0.5
-
-    atr = bundle.atr if bundle.atr > 0 else 1e-6
-    dist = abs(bundle.close - hi_lo.value) / atr
-
-    # 0.5-2.0 ATR from line = optimal zone (enough range, not overextended)
-    if dist < 0.5:
-        raw = 0.2        # price hugging the line — weak conviction
-    elif dist <= 2.0:
-        raw = dist / 2.0  # linear: more distance = more potential
-    else:
-        raw = 1.0 - (dist - 2.0) * 0.15  # diminish beyond 2 ATR
-    return float(np.clip(raw, 0.0, 1.0))
 
 
 def _bollinger_completion_score(
@@ -344,10 +321,8 @@ class TotalScoreResult:
     # Components
     mcs_raw: float
     bcs_raw: float
-    hcs_raw: float
     mcs_n: float
     bcs_n: float
-    hcs_n: float
     ves: float
     es: float
     cs: float
@@ -390,12 +365,10 @@ def compute(
     # ── 1. Compute raw scores ──────────────────────────────────────────────
     mcs_raw = _macd_completion_score(macd_analysis, bundle)
     bcs_raw = _bollinger_completion_score(bb_analysis, bundle)
-    hcs_raw = _hi_lo_completion_score(bundle)
 
     # ── 2. Normalize to [0, 1] via sigmoid ────────────────────────────────
     mcs_n = _normalize(mcs_raw, center=0.5, scale=0.5)
     bcs_n = _normalize(bcs_raw, center=0.5, scale=0.5)
-    hcs_n = _normalize(hcs_raw, center=0.5, scale=0.3)
 
     # ── 3. Compute VES, ES, CS, RS ────────────────────────────────────────
     ves = _volatility_expansion_score(mcs_n, bcs_n, bundle, atr_avg, vol_avg)
@@ -416,10 +389,10 @@ def compute(
     rs_n = rs
 
     # ── 4. Get combined weights ────────────────────────────────────────────
-    wm, wb, wh, wv, we, wc, wr = _combined_weights(asset_class_str, timeframe)
+    wm, wb, wv, we, wc, wr = _combined_weights(asset_class_str, timeframe)
 
     # ── 5. TotalScore ─────────────────────────────────────────────────────
-    total = (wm * mcs_n + wb * bcs_n + wh * hcs_n + wv * ves_n
+    total = (wm * mcs_n + wb * bcs_n + wv * ves_n
              - we * es_n          # ES subtracts
              + wc * cs_n
              - wr * rs_n)         # RS subtracts (risk penalty)
@@ -469,15 +442,13 @@ def compute(
         lot_multiplier=lot_mult,
         mcs_raw=round(mcs_raw, 4),
         bcs_raw=round(bcs_raw, 4),
-        hcs_raw=round(hcs_raw, 4),
         mcs_n=round(mcs_n, 4),
         bcs_n=round(bcs_n, 4),
-        hcs_n=round(hcs_n, 4),
         ves=round(ves, 4),
         es=round(es, 4),
         cs=round(cs, 4),
         rs=round(rs, 4),
-        weights={"wm": wm, "wb": wb, "wh": wh, "wv": wv, "we": we, "wc": wc, "wr": wr},
+        weights={"wm": wm, "wb": wb, "wv": wv, "we": we, "wc": wc, "wr": wr},
         blocked_by_es=blocked_by_es,
         notes=notes,
     )
@@ -492,7 +463,6 @@ def opportunity_score_from_result(result: TotalScoreResult) -> tuple[float, str]
     return compute_opportunity_score(
         mcs=result.mcs_n,
         bcs=result.bcs_n,
-        hcs=result.hcs_n,
         ves=result.ves,
         es=result.es,
     )
@@ -524,7 +494,7 @@ def describe_score(result: TotalScoreResult) -> str:
         f"{result.symbol} {result.timeframe} [{result.asset_class}] "
         f"score={result.total_score:.3f} -> {result.decision.upper()} "
         f"lot={result.lot_multiplier:.2f} | "
-        f"MCS={result.mcs_n:.2f} BCS={result.bcs_n:.2f} HCS={result.hcs_n:.2f} "
+        f"MCS={result.mcs_n:.2f} BCS={result.bcs_n:.2f} "
         f"VES={result.ves:.2f} ES={result.es:.2f} "
         f"CS={result.cs:.2f} RS={result.rs:.2f}"
     )

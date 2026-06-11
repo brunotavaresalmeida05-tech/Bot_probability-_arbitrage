@@ -22,9 +22,9 @@ from src.technical.indicators import IndicatorBundle
 
 # ── Pesos (fixos) ─────────────────────────────────────────────────────────────
 
-# OpportunityScore = a1*MCS + a2*BCS + a3*HCS + a4*VES - a5*ES
-# Max teórico ≈ 0.72 (soma pesos positivos)
-_OPP_WEIGHTS = (0.24, 0.18, 0.12, 0.18, 0.10)
+# OpportunityScore = a1*MCS + a2*BCS + a3*VES - a4*ES
+# Max teórico ≈ 0.60 (soma pesos positivos)
+_OPP_WEIGHTS = (0.30, 0.25, 0.25, 0.20)
 
 # PermissionScore = b1*CS - b2*RS - b3*ES + b4*ATRFit
 # Max teórico ≈ 0.55 (soma pesos positivos)
@@ -130,7 +130,6 @@ class OpportunityResult:
     perm_threshold:    float        # threshold de permissão para este ativo/TF
     mcs:  float = 0.0
     bcs:  float = 0.0
-    hcs:  float = 0.0
     ves:  float = 0.0
     es:   float = 0.0
     notes: list[str] = field(default_factory=list)
@@ -265,7 +264,6 @@ def _rsi_perm_penalty(rsi: float, weight: float = 1.0) -> float:
 def compute_opportunity_score(
     mcs: float,
     bcs: float,
-    hcs: float,
     ves: float,
     es:  float,
     opp_threshold: float = 0.33,
@@ -273,7 +271,7 @@ def compute_opportunity_score(
     rsi_weight: float = 1.0,
 ) -> tuple[float, str]:
     """
-    OpportunityScore = a1*MCS + a2*BCS + a3*HCS + a4*VES - a5*ES + rsi_adj*rsi_weight
+    OpportunityScore = a1*MCS + a2*BCS + a3*VES - a4*ES + rsi_adj*rsi_weight
 
     rsi=50.0 → sem efeito (neutro, retrocompatível).
     rsi_weight=0.0 → RSI desligado (política de calibração).
@@ -284,8 +282,8 @@ def compute_opportunity_score(
       >= opp_threshold               → "watchlist"
       <  opp_threshold               → "weak"
     """
-    a1, a2, a3, a4, a5 = _OPP_WEIGHTS
-    raw   = a1 * mcs + a2 * bcs + a3 * hcs + a4 * ves - a5 * es + _rsi_opp_adj(rsi, rsi_weight)
+    a1, a2, a3, a4 = _OPP_WEIGHTS
+    raw   = a1 * mcs + a2 * bcs + a3 * ves - a4 * es + _rsi_opp_adj(rsi, rsi_weight)
     score = float(np.clip(raw, 0.0, 1.0))
 
     strong_thr = opp_threshold * _STRONG_MULTIPLIER
@@ -396,7 +394,6 @@ def build_opportunity(
     bundle:       IndicatorBundle | None,
     mcs:          float,
     bcs:          float,
-    hcs:          float,
     ves:          float,
     es:           float,
     asset_class:  str = "unknown",
@@ -418,7 +415,7 @@ def build_opportunity(
     rsi_weight = get_policy().get_weight(asset_class, timeframe, vol_regime)
 
     cal   = get_thresholds(asset_class, timeframe, vix=vix, rs=rs, session=session)
-    score, label = compute_opportunity_score(mcs, bcs, hcs, ves, es,
+    score, label = compute_opportunity_score(mcs, bcs, ves, es,
                                               opp_threshold=cal.opp_threshold,
                                               rsi=rsi,
                                               rsi_weight=rsi_weight)
@@ -435,7 +432,6 @@ def build_opportunity(
         perm_threshold=cal.perm_threshold,
         mcs=round(mcs, 4),
         bcs=round(bcs, 4),
-        hcs=round(hcs, 4),
         ves=round(ves, 4),
         es=round(es, 4),
         notes=notes or ([base_note, rsi_note] if rsi_note else [base_note]),

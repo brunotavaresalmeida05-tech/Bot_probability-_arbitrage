@@ -43,7 +43,6 @@ class TimeframeView:
     signal: TFSignal
     macd_dir: str
     bb_state: str           # expanding_up | expanding_down | contracting | neutral
-    sar_dir: str
     price_vs_ma50: str      # "above" | "below" | "at"
     price_vs_vwap: str      # "above" | "below" | "at"
     weight: float           # 1H=3, 30m=2, 15m=1.5, 5m=1, 3m=0.5
@@ -100,7 +99,7 @@ def _build_view(bundle: IndicatorBundle) -> TimeframeView:
     if bundle is None:
         return TimeframeView(
             timeframe="?", signal=TFSignal.NONE, macd_dir="flat",
-            bb_state="neutral", sar_dir="flat",
+            bb_state="neutral",
             price_vs_ma50="at", price_vs_vwap="at",
             weight=1.0,
         )
@@ -118,9 +117,6 @@ def _build_view(bundle: IndicatorBundle) -> TimeframeView:
                 bb_state = "expanding_down"
         elif bundle.bollinger.width < getattr(bundle.bollinger, "_prev_width", 1) * 0.98:
             bb_state = "contracting"
-
-    # SAR direction
-    sar_dir = bundle.sar.direction if bundle.sar else "flat"
 
     # Price vs MA50
     if bundle.ma50 > 0:
@@ -148,14 +144,12 @@ def _build_view(bundle: IndicatorBundle) -> TimeframeView:
     bull_count = sum([
         macd_dir == "bullish",
         bb_state == "expanding_up",
-        sar_dir == "bullish",
         price_vs_ma50 == "above",
         price_vs_vwap == "above",
     ])
     bear_count = sum([
         macd_dir == "bearish",
         bb_state == "expanding_down",
-        sar_dir == "bearish",
         price_vs_ma50 == "below",
         price_vs_vwap == "below",
     ])
@@ -172,7 +166,6 @@ def _build_view(bundle: IndicatorBundle) -> TimeframeView:
         signal=signal,
         macd_dir=macd_dir,
         bb_state=bb_state,
-        sar_dir=sar_dir,
         price_vs_ma50=price_vs_ma50,
         price_vs_vwap=price_vs_vwap,
         weight=_TF_WEIGHTS.get(bundle.timeframe, 1.0),
@@ -276,7 +269,7 @@ def analyze(
 
     # Log TF summary
     for tf, view in sorted(views.items()):
-        rationale.append(f"{tf}: {view.signal.value} MACD={view.macd_dir} BB={view.bb_state} SAR={view.sar_dir}")
+        rationale.append(f"{tf}: {view.signal.value} MACD={view.macd_dir} BB={view.bb_state}")
 
     return MTFResult(
         symbol=symbol,

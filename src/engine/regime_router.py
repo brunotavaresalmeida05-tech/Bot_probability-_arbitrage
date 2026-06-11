@@ -78,13 +78,6 @@ def detect(bundle: IndicatorBundle, macro: MacroContext | None = None) -> Regime
             bear += 2
             rationale.append(f"MA50({ma50:.5f})<MA100({ma100:.5f}) estrutura bearish")
 
-    # Hi-Lo Activator
-    if bundle.hi_lo:
-        if bundle.hi_lo.direction == "bullish":
-            bull += 1
-        elif bundle.hi_lo.direction == "bearish":
-            bear += 1
-
     # ATR Stop (Chandelier)
     if bundle.atr_stop:
         if bundle.atr_stop.direction == "bullish":

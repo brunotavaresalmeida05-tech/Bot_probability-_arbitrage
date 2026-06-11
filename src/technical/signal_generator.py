@@ -23,7 +23,7 @@ Signal requires ALL of:
   - No higher TF veto
   - Bollinger not in full contraction
   - MACD direction aligns
-  - min 4/8 technical confirmations
+  - min 4/9 technical confirmations (8 tech + max 2 SMC with RSI guard)
 """
 from dataclasses import dataclass, field
 
@@ -36,6 +36,7 @@ from src.analysis.total_score import compute as compute_total_score, TotalScoreR
 from src.macro.macro_context import MacroContext
 from src.engine import regime_router as _regime
 from src.engine.regime_router import RegimeState
+from src.analysis.smc import smc_score_with_regime_context
 
 import logging
 logger = logging.getLogger(__name__)
@@ -78,11 +79,11 @@ def _detect_pure_technical_bias(
     Requirements:
       1. TotalScore >= min_total_score
       2. BB not in squeeze (move needs energy)
-      3. At least min_directional_agrees of MACD/Hi-Lo/ATRStop/SAR agree on one direction
+      3. At least min_directional_agrees of MACD/ATRStop agree on one direction
       4. RSI not in exhaustion zone for that direction
     """
     min_score   = cfg.get("min_total_score", 0.72)
-    min_agrees  = cfg.get("min_directional_agrees", 3)
+    min_agrees  = cfg.get("min_directional_agrees", 2)
     rsi_max_long  = cfg.get("rsi_max_long",  75.0)
     rsi_min_short = cfg.get("rsi_min_short", 25.0)
 
@@ -111,25 +112,11 @@ def _detect_pure_technical_bias(
     elif macd_dir == "bearish":
         sell_agrees += 1
 
-    # Hi-Lo
-    if bundle.hi_lo:
-        if bundle.hi_lo.direction == "bullish":
-            buy_agrees  += 1
-        elif bundle.hi_lo.direction == "bearish":
-            sell_agrees += 1
-
     # ATR Stop
     if bundle.atr_stop:
         if bundle.atr_stop.direction == "bullish":
             buy_agrees  += 1
         elif bundle.atr_stop.direction == "bearish":
-            sell_agrees += 1
-
-    # SAR
-    if bundle.sar:
-        if bundle.sar.direction == "bullish":
-            buy_agrees  += 1
-        elif bundle.sar.direction == "bearish":
             sell_agrees += 1
 
     # Determine unambiguous bias
@@ -170,7 +157,6 @@ class FinalSignal:
     # Score components — usados pelo Opportunity-Permission Engine
     mcs_n: float = 0.0
     bcs_n: float = 0.0
-    hcs_n: float = 0.0
     ves:   float = 0.0
     es:    float = 0.0
     cs:    float = 0.0
@@ -251,7 +237,6 @@ def generate(
         total_score_decision=ts_result.decision,
         mcs_n=ts_result.mcs_n,
         bcs_n=ts_result.bcs_n,
-        hcs_n=ts_result.hcs_n,
         ves=ts_result.ves,
         es=ts_result.es,
         cs=ts_result.cs,
@@ -353,29 +338,17 @@ def generate(
         scenario_str = scenario_result.scenario.value
         bias = SIGNAL_BUY if scenario_str == Scenario.BULL.value else SIGNAL_SELL
 
-    # ── COLLECT CONFIRMATIONS (8 conditions) ─────────────────────────
+    # ── COLLECT CONFIRMATIONS (9 conditions max: 8 technical + max 2 SMC with RSI guard) ──
     confirms = 0
 
-    # 1. MACD direction
+    # 1. MACD divergence bonus
     if macd_analysis:
-        macd_ok = (bias == SIGNAL_BUY and macd_analysis.direction == "bullish") or \
-                  (bias == SIGNAL_SELL and macd_analysis.direction == "bearish")
-        if macd_ok:
-            confirms += 1
-            rationale.append(f"[+] MACD {macd_analysis.direction}")
-        else:
-            rationale.append(f"[-] MACD {macd_analysis.direction} vs bias {bias}")
-        # Divergence bonus
         if (macd_analysis.divergence == "bullish_div" and bias == SIGNAL_BUY) or \
            (macd_analysis.divergence == "bearish_div" and bias == SIGNAL_SELL):
             confirms += 1
             rationale.append(f"[+] MACD divergence: {macd_analysis.divergence}")
-    elif bundle.macd:
-        macd_ok = (bias == SIGNAL_BUY and bundle.macd.direction == "bullish") or \
-                  (bias == SIGNAL_SELL and bundle.macd.direction == "bearish")
-        if macd_ok:
-            confirms += 1
-            rationale.append(f"[+] MACD {bundle.macd.direction}")
+        else:
+            rationale.append(f"[-] MACD: sem divergencia ({macd_analysis.direction})")
 
     # 2. Bollinger signal
     if bb_analysis:
@@ -398,17 +371,7 @@ def generate(
             confirms += 1
             rationale.append("[+] BB expanding")
 
-    # 3. Hi-Lo Activator
-    if bundle.hi_lo:
-        hilo_ok = (bias == SIGNAL_BUY and bundle.hi_lo.direction == "bullish") or \
-                  (bias == SIGNAL_SELL and bundle.hi_lo.direction == "bearish")
-        if hilo_ok:
-            confirms += 1
-            rationale.append(f"[+] Hi-Lo {bundle.hi_lo.direction} @ {bundle.hi_lo.value}")
-        else:
-            rationale.append(f"[-] Hi-Lo {bundle.hi_lo.direction} vs bias {bias}")
-
-    # 4. ATR Stop
+    # 3. ATR Stop
     if bundle.atr_stop:
         atr_stop_ok = (bias == SIGNAL_BUY and bundle.atr_stop.direction == "bullish") or \
                       (bias == SIGNAL_SELL and bundle.atr_stop.direction == "bearish")
@@ -418,17 +381,7 @@ def generate(
         else:
             rationale.append(f"[-] ATR Stop {bundle.atr_stop.direction} vs bias {bias}")
 
-    # 5. SAR direction
-    if bundle.sar:
-        sar_ok = (bias == SIGNAL_BUY and bundle.sar.direction == "bullish") or \
-                 (bias == SIGNAL_SELL and bundle.sar.direction == "bearish")
-        if sar_ok:
-            confirms += 1
-            rationale.append(f"[+] SAR {bundle.sar.direction}")
-        else:
-            rationale.append(f"[-] SAR {bundle.sar.direction}")
-
-    # 6. Price vs VWAP
+    # 4. Price vs VWAP
     if bundle.vwap > 0:
         vwap_ok = (bias == SIGNAL_BUY and price > bundle.vwap) or \
                   (bias == SIGNAL_SELL and price < bundle.vwap)
@@ -438,7 +391,7 @@ def generate(
         else:
             rationale.append(f"[-] VWAP: lado errado")
 
-    # 7. MA50/MA100 trend alignment
+    # 5. MA50/MA100 trend alignment
     if bundle.ma50 > 0 and bundle.ma100 > 0:
         ma_ok = (bias == SIGNAL_BUY and price > bundle.ma50 > bundle.ma100) or \
                 (bias == SIGNAL_SELL and price < bundle.ma50 < bundle.ma100)
@@ -448,7 +401,7 @@ def generate(
         else:
             rationale.append("[-] MA: tendencia nao alinhada")
 
-    # 8. Fair price proximity (good entry zone)
+    # 6. Fair price proximity (good entry zone)
     if fair_price > 0:
         dist_pct = abs(price - fair_price) / fair_price
         if dist_pct <= 0.004:
@@ -457,11 +410,45 @@ def generate(
         elif dist_pct > 0.015:
             rationale.append(f"[-] Longe do preco justo: {dist_pct*100:.3f}%")
 
+    # ── SMC CONFIRMATIONS (7–8) — regime-weighted score ────────────────────
+    # Score computed once from regime context:
+    #   RANGING:      full OB/FVG/BOS weight (best environment for zone trading)
+    #   TRENDING_*:   aligned side +15%, opposing side -40%
+    #   VOLATILE:     0.0 — no new SMC entries
+    # score >= 0.75 → 2 confirms (strong confluence); >= 0.30 → 1; else 0
+    smc = bundle.smc
+    if smc is not None:
+        regime_str = regime_result.state.value if regime_result else "RANGING"
+        bull_smc, bear_smc = smc_score_with_regime_context(smc, regime_str, bundle.adx)
+        smc_score = bull_smc if bias == SIGNAL_BUY else bear_smc
+
+        # RSI extreme guard: PermissionScore already blocks, SMC shouldn't add confidence
+        if (bias == SIGNAL_BUY and bundle.rsi >= 75.0) or \
+           (bias == SIGNAL_SELL and bundle.rsi <= 25.0):
+            smc_score = 0.0
+            rationale.append(f"[~] SMC: zeroed — RSI extremo {bundle.rsi:.1f}")
+
+        if smc_score >= 0.75:
+            confirms += 2
+            rationale.append(f"[+] SMC: forte confluencia regime={regime_str} score={smc_score:.2f}")
+        elif smc_score >= 0.30:
+            confirms += 1
+            rationale.append(f"[+] SMC: confluencia regime={regime_str} score={smc_score:.2f}")
+        else:
+            rationale.append(f"[-] SMC: score={smc_score:.2f} regime={regime_str} (insuficiente)")
+
+        # ChoCh logged for context (informs reversal conviction, not a gate)
+        if smc.last_choch:
+            choch_aligned = (bias == SIGNAL_BUY and smc.last_choch == "bullish") or \
+                            (bias == SIGNAL_SELL and smc.last_choch == "bearish")
+            tag = "[+]" if choch_aligned else "[~]"
+            rationale.append(f"{tag} SMC: ChoCh {smc.last_choch}")
+
     # ── FINAL DECISION ─────────────────────────────────────────────────────
-    # Gate selection by mode:
-    #   TRENDING  (V9.1) — 3/8 confirms, TotalScore=context, only H1 veto applies
-    #   TECNICO_PURO     — 5/8 confirms, TotalScore >= 0.72, MTF not required
-    #   Normal macro     — 4/8 confirms, TotalScore execute/moderate, MTF >= 0.50
+    # Gate selection by mode (pool = 9 = 8 tech + max 2 SMC with RSI guard):
+    #   TRENDING  (V9.1) — 3/9 confirms, TotalScore=context, only H1 veto applies
+    #   TECNICO_PURO     — 5/9 confirms, TotalScore >= 0.72, MTF not required
+    #   Normal macro     — 4/9 confirms, TotalScore execute/moderate, MTF >= 0.50
     if pure_technical and trending_regime:
         min_confirms = 3
         ts_ok = True
@@ -522,8 +509,8 @@ def generate(
     macd_support = macd_analysis.nearest_support if macd_analysis else None
     bb_day_max = bb_analysis.day_max if bb_analysis else 0.0
     bb_day_min = bb_analysis.day_min if bb_analysis else 0.0
-    pivot_r1 = bundle.pivot.r1 if bundle.pivot else 0.0
-    pivot_s1 = bundle.pivot.s1 if bundle.pivot else 0.0
+    pivot_r1 = 0.0
+    pivot_s1 = 0.0
 
     if final_signal != SIGNAL_HOLD:
         logger.info(

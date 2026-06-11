@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from src.analysis.smc import analyze as _smc_analyze, SMCResult
 """
 Technical Indicators — V9
 
@@ -57,33 +59,9 @@ class BollingerResult:
 
 
 @dataclass
-class SARResult:
-    value: float
-    direction: str          # "bullish" (SAR below price) | "bearish" (SAR above price)
-    reversal: bool = False  # True if direction changed vs previous bar
-
-
-@dataclass
-class HiLoResult:
-    value: float      # current hi-lo line level
-    direction: str    # "bullish" (price above line) | "bearish" (price below line)
-
-
-@dataclass
 class ATRStopResult:
     value: float      # stop level (Chandelier Exit)
     direction: str    # "bullish" (price above stop) | "bearish" (price below stop)
-
-
-@dataclass
-class PivotResult:
-    pp: float               # pivot point
-    r1: float
-    r2: float
-    r3: float
-    s1: float
-    s2: float
-    s3: float
 
 
 @dataclass
@@ -96,18 +74,15 @@ class IndicatorBundle:
     volume: float = 0.0
     macd: MACDResult | None = None
     bollinger: BollingerResult | None = None
-    sar: SARResult | None = None
-    hi_lo: HiLoResult | None = None
     atr_stop: ATRStopResult | None = None
-    ema8: float = 0.0
     vwap: float = 0.0
     ma50: float = 0.0
     ma100: float = 0.0
-    pivot: PivotResult | None = None
     weis_wave: float = 0.0  # cumulative volume delta (Weis Wave proxy)
     atr: float = 0.0
     rsi: float = 50.0       # RSI(14); 50.0 = neutro por defeito
     adx: float = 20.0       # ADX(14); 20.0 = neutro por defeito
+    smc: SMCResult | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -211,38 +186,6 @@ def bollinger(
     )
 
 
-def hi_lo_activator(
-    highs: pd.Series,
-    lows: pd.Series,
-    closes: pd.Series,
-    period: int = 8,
-) -> HiLoResult:
-    """
-    Hi-Lo Activator: SMA of lows in uptrend, SMA of highs in downtrend.
-    Bullish when price > SMA(highs); bearish when price < SMA(lows).
-    Between the two lines, direction follows price vs midpoint.
-    """
-    sma_lows  = lows.rolling(period).mean()
-    sma_highs = highs.rolling(period).mean()
-
-    last_close     = float(closes.iloc[-1])
-    last_sma_low   = float(sma_lows.iloc[-1])
-    last_sma_high  = float(sma_highs.iloc[-1])
-
-    if last_close > last_sma_high:
-        direction = "bullish"
-        value     = last_sma_low
-    elif last_close < last_sma_low:
-        direction = "bearish"
-        value     = last_sma_high
-    else:
-        midpoint  = (last_sma_low + last_sma_high) / 2
-        direction = "bullish" if last_close >= midpoint else "bearish"
-        value     = last_sma_low if direction == "bullish" else last_sma_high
-
-    return HiLoResult(value=round(value, 5), direction=direction)
-
-
 def atr_stop_indicator(
     highs: pd.Series,
     lows: pd.Series,
@@ -269,61 +212,6 @@ def atr_stop_indicator(
     return ATRStopResult(value=round(short_stop, 5), direction="bearish")
 
 
-def parabolic_sar(
-    highs: pd.Series,
-    lows: pd.Series,
-    closes: pd.Series,
-    af_start: float = 0.02,
-    af_max: float = 0.2,
-) -> SARResult:
-    """Parabolic SAR — stop and reversal method."""
-    h = highs.values
-    l = lows.values
-    c = closes.values
-
-    if len(c) < 2:
-        return SARResult(value=c[-1], direction="bullish")
-
-    # Simplified implementation: track trend and SAR
-    bull = c[-1] > c[-2]
-    sar_val = l[-2] if bull else h[-2]
-    af = af_start
-    ep = h[-1] if bull else l[-1]
-
-    for i in range(2, len(c)):
-        if bull:
-            sar_val = sar_val + af * (ep - sar_val)
-            sar_val = min(sar_val, l[i - 1], l[i - 2])
-            if l[i] < sar_val:
-                bull = False
-                sar_val = ep
-                ep = l[i]
-                af = af_start
-            else:
-                if h[i] > ep:
-                    ep = h[i]
-                    af = min(af + af_start, af_max)
-        else:
-            sar_val = sar_val + af * (ep - sar_val)
-            sar_val = max(sar_val, h[i - 1], h[i - 2])
-            if h[i] > sar_val:
-                bull = True
-                sar_val = ep
-                ep = h[i]
-                af = af_start
-            else:
-                if l[i] < ep:
-                    ep = l[i]
-                    af = min(af + af_start, af_max)
-
-    direction = "bullish" if bull else "bearish"
-    return SARResult(value=round(float(sar_val), 5), direction=direction)
-
-
-def ema(closes: pd.Series, period: int = 8) -> float:
-    return round(float(_ema(closes, period).iloc[-1]), 5)
-
-
 def vwap(closes: pd.Series, volumes: pd.Series) -> float:
     """
     Session VWAP — uses all bars provided (should be intraday from session open).
@@ -335,22 +223,6 @@ def vwap(closes: pd.Series, volumes: pd.Series) -> float:
 
 def sma(closes: pd.Series, period: int) -> float:
     return round(float(closes.rolling(period).mean().iloc[-1]), 5)
-
-
-def pivot_points(high: float, low: float, close: float) -> PivotResult:
-    """Standard Pivot Points from previous session H/L/C."""
-    pp = (high + low + close) / 3
-    r1 = 2 * pp - low
-    s1 = 2 * pp - high
-    r2 = pp + (high - low)
-    s2 = pp - (high - low)
-    r3 = high + 2 * (pp - low)
-    s3 = low - 2 * (high - pp)
-    return PivotResult(
-        pp=round(pp, 5),
-        r1=round(r1, 5), r2=round(r2, 5), r3=round(r3, 5),
-        s1=round(s1, 5), s2=round(s2, 5), s3=round(s3, 5),
-    )
 
 
 def atr(highs: pd.Series, lows: pd.Series, closes: pd.Series, period: int = 14) -> float:
@@ -468,10 +340,7 @@ def compute_bundle(
 
     bundle.macd = macd(closes)
     bundle.bollinger = bollinger(closes, period=10, prev_width=prev_bb_width)
-    bundle.hi_lo = hi_lo_activator(highs, lows, closes)
     bundle.atr_stop = atr_stop_indicator(highs, lows, closes)
-    bundle.sar = parabolic_sar(highs, lows, closes)
-    bundle.ema8 = ema(closes, 8)
     bundle.vwap = vwap(closes, volumes)
     bundle.ma50 = sma(closes, 50) if len(closes) >= 50 else 0.0
     bundle.ma100 = sma(closes, 100) if len(closes) >= 100 else 0.0
@@ -479,8 +348,6 @@ def compute_bundle(
     bundle.atr = atr(highs, lows, closes)
     bundle.rsi = rsi_14(closes)
     bundle.adx = adx_indicator(highs, lows, closes)
-
-    if prev_session_high and prev_session_low and prev_session_close:
-        bundle.pivot = pivot_points(prev_session_high, prev_session_low, prev_session_close)
+    bundle.smc = _smc_analyze(df, bundle.atr)
 
     return bundle
