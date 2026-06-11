@@ -20,7 +20,6 @@ Hierarquia de 4 camadas (conforme metodologia de trading):
 
   Camada 3 — Participação (reforço de CS / filtros binários)
     Weis Wave / Volume — confirmação de força real do movimento
-    Pivot Points   — zonas do dia e projeções de reação
     Fair Price (macro) — referência de trabalho do ativo na sessão
 
   Camada 4 — Contexto superior (→ CS e RS no TotalScore)

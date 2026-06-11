@@ -167,8 +167,6 @@ class FinalSignal:
     macd_support: float | None = None
     bb_day_max: float = 0.0
     bb_day_min: float = 0.0
-    pivot_r1: float = 0.0
-    pivot_s1: float = 0.0
 
 
 def generate(
@@ -509,8 +507,6 @@ def generate(
     macd_support = macd_analysis.nearest_support if macd_analysis else None
     bb_day_max = bb_analysis.day_max if bb_analysis else 0.0
     bb_day_min = bb_analysis.day_min if bb_analysis else 0.0
-    pivot_r1 = 0.0
-    pivot_s1 = 0.0
 
     if final_signal != SIGNAL_HOLD:
         logger.info(
@@ -527,6 +523,4 @@ def generate(
     base_signal.macd_support = macd_support
     base_signal.bb_day_max = bb_day_max
     base_signal.bb_day_min = bb_day_min
-    base_signal.pivot_r1 = pivot_r1
-    base_signal.pivot_s1 = pivot_s1
     return base_signal

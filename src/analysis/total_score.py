@@ -20,7 +20,7 @@ Camada de contexto e risco:
   RS:  Risk Score     — VIX + ATR Stop proximity + evento + drawdown (peso negativo)
 
 Indicadores de suporte (entram como filtros binários ou reforço de CS/MCS/RS):
-  VWAP, EMA 8, SMA 50/100, Parabolic SAR, Weis Wave, Pivot Points, Fair Price
+  VWAP, SMA 50/100, Weis Wave, Fair Price
 
 Weights vary by:
   - Asset class: forex | indices | gold | oil | treasuries | crypto

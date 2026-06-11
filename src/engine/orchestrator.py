@@ -55,6 +55,7 @@ from src.execution.order_manager import OrderManager
 from src.risk.professional_risk import ProfessionalRiskManager
 from src.benchmark.portfolio_monitor import BenchmarkPortfolioMonitor
 from src.engine.circuit_breaker import CircuitBreaker, CBLevel
+from src.engine.capital_manager import CapitalManagerV2
 from src.engine import regime_router as _regime_mod
 from src.engine.scanner import (
     build_opportunity, scan,
@@ -62,6 +63,10 @@ from src.engine.scanner import (
     OpportunityResult, PermissionResult,
 )
 from src.engine.scanner_metrics import ScannerMetrics
+from src.engine.market_families import (
+    get_family, analyze_family, check_duplicate_exposure,
+)
+from src.engine.trailing_manager import TrailingManager
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +74,26 @@ TIMEFRAMES   = ["M5", "M15", "M30", "H1"]
 PRIMARY_TF   = "M5"
 STATE_PATH   = Path("state/state.json")
 HISTORY_PATH = Path("state/state_history.jsonl")
+
+
+def _smc_to_dict(bundle) -> dict:
+    """Serialize SMCResult from an IndicatorBundle for state.json output."""
+    smc = getattr(bundle, "smc", None) if bundle else None
+    if smc is None:
+        return {}
+    return {
+        "bullish_ob_nearby": smc.bullish_ob_nearby,
+        "bearish_ob_nearby": smc.bearish_ob_nearby,
+        "bullish_fvg":       smc.bullish_fvg,
+        "bearish_fvg":       smc.bearish_fvg,
+        "last_bos":          smc.last_bos,
+        "last_choch":        smc.last_choch,
+        "sweep_recent":      smc.sweep_recent,
+        "ob_count":          len(smc.order_blocks),
+        "fvg_count":         len(smc.fvgs),
+        "unmitigated_obs":   sum(1 for ob in smc.order_blocks if not ob.mitigated),
+        "unfilled_fvgs":     sum(1 for fvg in smc.fvgs if not fvg.filled),
+    }
 
 
 class Orchestrator:
@@ -80,7 +105,16 @@ class Orchestrator:
         self._cycle = 0
         self._lock = threading.Lock()
 
-        self._symbols: list[str] = config.get("symbols", ["EURUSD", "GOLD"])
+        self._tradable_symbols: list[str] = config.get("tradable", config.get("symbols", ["EURUSD", "GOLD"]))
+        self._futures_mirrors:  set[str]  = set(config.get("futures_mirror", []))
+        self._context_syms:     set[str]  = set(config.get("context_benchmark", []))
+        # Full set of symbols to fetch bars for (tradable + mirror + context)
+        self._symbols: list[str] = (
+            self._tradable_symbols
+            + [s for s in config.get("futures_mirror", []) if s not in self._tradable_symbols]
+            + [s for s in config.get("context_benchmark", []) if s not in self._tradable_symbols]
+        )
+        self._non_tradable: set[str] = self._futures_mirrors | self._context_syms
 
         # ── Central macro state ────────────────────────────────────────
         self.macro = MacroContext()
@@ -99,7 +133,6 @@ class Orchestrator:
 
         # ── Core components ────────────────────────────────────────────
         self._risk       = ProfessionalRiskManager(self.macro)
-        self._orders     = OrderManager(mt5, self._risk, dry_run=dry_run)
         self._prep       = PrepWorkflow(self.macro)
         self._corr       = CorrelationMatrix(window=20)
 
@@ -116,7 +149,14 @@ class Orchestrator:
         self._perm_results: dict[str, str] = {}
         self._metrics = ScannerMetrics()
         self._cb = CircuitBreaker()
+        self._cm = CapitalManagerV2(
+            initial_capital=float(config.get("initial_capital", 10_000.0))
+        )
+        # OrderManager wired after cm is ready so it can use structured TP
+        self._orders = OrderManager(mt5, self._risk, dry_run=dry_run, cm=self._cm)
         self._last_regime: dict = {"state": "UNKNOWN", "direction": "neutral", "adx": 20.0, "lot_context": 1.0}
+        # Trailing manager shares the bundles reference (read-only from its thread)
+        self._trailing = TrailingManager(self._bundles, dry_run=dry_run)
 
     # ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -128,12 +168,13 @@ class Orchestrator:
         self._news.start()
         self._calendar.start()
         self._benchmark.start()
-        logger.info("All daemons started: VIX, DXY, Yield, Commodity, News, Calendar, Benchmark")
+        self._trailing.start()
+        logger.info("All daemons started: VIX, DXY, Yield, Commodity, News, Calendar, Benchmark, TrailingManager")
 
     def stop(self):
         self._shutdown = True
         for d in [self._vix, self._dxy, self._yield, self._commodity, self._news,
-                  self._calendar, self._benchmark]:
+                  self._calendar, self._benchmark, self._trailing]:
             try:
                 d.stop()
             except Exception:
@@ -142,9 +183,16 @@ class Orchestrator:
 
     def update_account(self, info):
         try:
-            equity = float(info.equity)
-            self._risk.update_account(float(info.balance), equity)
+            balance = float(info.balance)
+            equity  = float(info.equity)
+            margin_level_pct = float(getattr(info, "margin_level", 9999.0))
+            margin_free      = float(getattr(info, "margin_free", 0.0))
+            # MT5 returns 0.0 when no open positions (equity/margin undefined)
+            if margin_level_pct == 0.0:
+                margin_level_pct = 9999.0
+            self._risk.update_account(balance, equity)
             self._cb.set_session_equity(equity)
+            self._cm.update_account(balance, equity, margin_level_pct, margin_free)
         except Exception:
             pass
 
@@ -170,6 +218,10 @@ class Orchestrator:
         for sym in self._symbols:
             sig = self._process_symbol(sym, session)
             if sig is None:
+                continue
+            # Futures mirrors and context benchmarks: bundles already stored,
+            # but we don't include them in the signal pipeline
+            if sym in self._non_tradable:
                 continue
             all_sigs[sym] = sig
             fp = self._fair_prices.get(sym)
@@ -272,6 +324,30 @@ class Orchestrator:
                     sig.lot_multiplier *= 0.5
                 signals.append(sig)
 
+        # ── Phase 3b: family confluence analysis ────────────────────────────
+        # For each tradable signal that has a futures mirror, compare
+        # spot vs futures direction/spread and adjust confidence.
+        _family_analyses: dict[str, object] = {}
+        for sig in signals:
+            family = get_family(sig.symbol)
+            if family is None or family.futures is None:
+                continue
+            spot_bundle    = self._bundles.get(sig.symbol, {}).get(PRIMARY_TF)
+            futures_bundle = self._bundles.get(family.futures, {}).get(PRIMARY_TF)
+            analysis = analyze_family(family, spot_bundle, futures_bundle)
+            _family_analyses[sig.symbol] = analysis
+            if analysis.confluence_delta != 0.0:
+                sig.confidence    = round(max(0.0, min(1.0, sig.confidence + analysis.confluence_delta)), 3)
+                sig.lot_multiplier = round(max(0.1, sig.lot_multiplier * (1.0 + analysis.confluence_delta)), 3)
+                notes_str = " | ".join(analysis.notes)
+                logger.info(
+                    f"[FAMILY] {sig.symbol}/{family.futures} delta={analysis.confluence_delta:+.3f}"
+                    f" conf->{sig.confidence:.3f} lot_mult->{sig.lot_multiplier:.3f} — {notes_str}"
+                )
+
+        # ── Phase 3c: deduplicate cross-family exposure ──────────────────────
+        signals = check_duplicate_exposure(signals)
+
         # Registar símbolos abaixo do threshold (weak — nunca chegam à fase de permissão)
         watchlist_syms = {o.symbol for o in watchlist}
         for opp in opportunities:
@@ -305,6 +381,7 @@ class Orchestrator:
                 "confidence":  rr.confidence,
                 "lot_context": rr.lot_context,
             }
+            self._cm.set_regime(rr.state.value)
 
         # ── Circuit breaker check ────────────────────────────────────────────
         cb_state = self._cb.update(current_equity=self._risk.state.equity)
@@ -319,18 +396,38 @@ class Orchestrator:
             for sig in signals:
                 sig.lot_multiplier *= cb_state.lot_multiplier
 
-        # ── Phase 4: execute — risk gate → order manager ─────────────────────
+        # Sync open position count into CM V2
+        self._cm.set_open_trades_count(len(self._risk.state.open_positions))
+
+        # ── Phase 4: execute — risk gate → CM V2 gate → order manager ────────
         for sig in signals:
             can_open, reason = self._risk.can_open(sig.symbol, sig.signal.lower())
-            if can_open:
+            cm_ok, cm_reason = self._cm.can_open_trade(sig.symbol)
+            if can_open and cm_ok:
+                # ATR and resistance levels for structured TP
+                _bundle = self._bundles.get(sig.symbol, {}).get(PRIMARY_TF)
+                _atr    = _bundle.atr if _bundle and _bundle.atr > 0 else 0.0
+                # For BUY: resistance above price is the target
+                # For SELL: support below price is the target
+                if sig.signal.lower() == "buy":
+                    _near = sig.macd_resistance
+                    _far  = None
+                else:
+                    _near = sig.macd_support
+                    _far  = None
                 self._orders.open_position(
                     symbol=sig.symbol,
                     direction=sig.signal.lower(),
                     sl_distance=sig.sl_distance,
                     tp_distance=sig.tp_distance,
+                    atr=_atr,
+                    nearest_res=_near,
+                    second_res=_far,
                 )
+            elif can_open and not cm_ok:
+                logger.info(f"[CM] {sig.symbol} blocked by CapitalManager: {cm_reason}")
 
-        state = self._build_state(ts, session, signals)
+        state = self._build_state(ts, session, signals, _family_analyses)
         self._write_state(state)
         return state
 
@@ -529,7 +626,7 @@ class Orchestrator:
             pass
         return 0.0
 
-    def _build_state(self, ts: str, session, signals: list) -> dict:
+    def _build_state(self, ts: str, session, signals: list, family_analyses: dict | None = None) -> dict:
         bench = self._benchmark.snapshot.to_summary() if self._benchmark else {}
         return {
             "ts": ts,
@@ -586,8 +683,33 @@ class Orchestrator:
                 "lot_multiplier": self._cb.state.lot_multiplier,
                 "rationale": self._cb.state.rationale,
             },
+            "capital_manager": self._cm.get_metrics(),
             "benchmark": bench,
             "scanner_metrics": self._metrics.snapshot(),
+            "family_analyses": {
+                sym: {
+                    "family":           fa.family_name,
+                    "futures":          fa.futures_symbol,
+                    "direction_aligned": fa.direction_aligned,
+                    "spread_normal":    fa.spread_normal,
+                    "confluence_delta": fa.confluence_delta,
+                    "notes":            fa.notes,
+                }
+                for sym, fa in (family_analyses or {}).items()
+            },
+            "watchlist_roles": {
+                "tradable":          self._tradable_symbols,
+                "futures_mirror":    sorted(self._futures_mirrors),
+                "context_benchmark": sorted(self._context_syms),
+            },
+            "smc": {
+                sym: _smc_to_dict(self._bundles.get(sym, {}).get(PRIMARY_TF))
+                for sym in self._tradable_symbols
+            },
+            "positions": [
+                dict(sym=sym, **info)
+                for sym, info in self._risk.state.open_positions.items()
+            ],
             "last_prep": self._last_prep,
             "dry_run": self._dry_run,
             "n_results": len(signals),
