@@ -67,16 +67,26 @@ def detect(bundle: IndicatorBundle, macro: MacroContext | None = None) -> Regime
     bull = 0
     bear = 0
 
-    # MA structure (highest weight — structural)
-    ma50  = bundle.ma50  or 0.0
-    ma100 = bundle.ma100 or 0.0
-    if ma50 > 0 and ma100 > 0:
-        if ma50 > ma100:
+    # EMA50/EMA100: estrutura médio/longo prazo (peso duplo)
+    ema50  = bundle.ema50  or 0.0
+    ema100 = bundle.ema100 or 0.0
+    ema20  = bundle.ema20  or 0.0
+    if ema50 > 0 and ema100 > 0:
+        if ema50 > ema100:
             bull += 2
-            rationale.append(f"MA50({ma50:.5f})>MA100({ma100:.5f}) estrutura bullish")
-        else:
+            rationale.append(f"EMA50({ema50:.5f})>EMA100({ema100:.5f}) estrutura bullish")
+        elif ema50 < ema100:
             bear += 2
-            rationale.append(f"MA50({ma50:.5f})<MA100({ma100:.5f}) estrutura bearish")
+            rationale.append(f"EMA50({ema50:.5f})<EMA100({ema100:.5f}) estrutura bearish")
+
+    # EMA20/EMA50: momentum curto prazo (peso simples)
+    if ema20 > 0 and ema50 > 0:
+        if ema20 > ema50:
+            bull += 1
+            rationale.append(f"EMA20({ema20:.5f})>EMA50({ema50:.5f}) momentum bullish")
+        elif ema20 < ema50:
+            bear += 1
+            rationale.append(f"EMA20({ema20:.5f})<EMA50({ema50:.5f}) momentum bearish")
 
     # ATR Stop (Chandelier)
     if bundle.atr_stop:
@@ -129,15 +139,18 @@ def detect(bundle: IndicatorBundle, macro: MacroContext | None = None) -> Regime
         )
 
     # ── ADX-based trend / range detection ──────────────────────────────
+    ema_aligned = (ema20 > ema50 > ema100 > 0) or (0 < ema20 < ema50 < ema100)
+    ema_bonus   = 0.10 if ema_aligned else 0.0
+
     if adx >= ADX_TRENDING and direction in ("bullish", "bearish"):
         state = RegimeState.TRENDING_UP if direction == "bullish" else RegimeState.TRENDING_DOWN
         lot_context = 1.0
-        confidence = min(1.0, adx / 40.0)
+        confidence = min(1.0, adx / 40.0 + ema_bonus)
         rationale.append(f"ADX={adx:.1f}>={ADX_TRENDING}: TRENDING")
     elif adx >= ADX_RANGING and direction in ("bullish", "bearish"):
         state = RegimeState.TRENDING_UP if direction == "bullish" else RegimeState.TRENDING_DOWN
         lot_context = 0.85
-        confidence = 0.5
+        confidence = min(1.0, 0.5 + ema_bonus)
         rationale.append(f"ADX={adx:.1f} borderline TRENDING (lot=0.85)")
     else:
         state = RegimeState.RANGING

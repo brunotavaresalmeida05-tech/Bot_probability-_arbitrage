@@ -43,7 +43,7 @@ class TimeframeView:
     signal: TFSignal
     macd_dir: str
     bb_state: str           # expanding_up | expanding_down | contracting | neutral
-    price_vs_ma50: str      # "above" | "below" | "at"
+    price_vs_ema50: str      # "above" | "below" | "at"
     price_vs_vwap: str      # "above" | "below" | "at"
     weight: float           # 1H=3, 30m=2, 15m=1.5, 5m=1, 3m=0.5
 
@@ -100,7 +100,7 @@ def _build_view(bundle: IndicatorBundle) -> TimeframeView:
         return TimeframeView(
             timeframe="?", signal=TFSignal.NONE, macd_dir="flat",
             bb_state="neutral",
-            price_vs_ma50="at", price_vs_vwap="at",
+            price_vs_ema50="at", price_vs_vwap="at",
             weight=1.0,
         )
 
@@ -119,15 +119,15 @@ def _build_view(bundle: IndicatorBundle) -> TimeframeView:
             bb_state = "contracting"
 
     # Price vs MA50
-    if bundle.ma50 > 0:
-        if bundle.close > bundle.ma50 * 1.001:
-            price_vs_ma50 = "above"
-        elif bundle.close < bundle.ma50 * 0.999:
-            price_vs_ma50 = "below"
+    if bundle.ema50 > 0:
+        if bundle.close > bundle.ema50 * 1.001:
+            price_vs_ema50 = "above"
+        elif bundle.close < bundle.ema50 * 0.999:
+            price_vs_ema50 = "below"
         else:
-            price_vs_ma50 = "at"
+            price_vs_ema50 = "at"
     else:
-        price_vs_ma50 = "at"
+        price_vs_ema50 = "at"
 
     # Price vs VWAP
     if bundle.vwap > 0:
@@ -144,13 +144,13 @@ def _build_view(bundle: IndicatorBundle) -> TimeframeView:
     bull_count = sum([
         macd_dir == "bullish",
         bb_state == "expanding_up",
-        price_vs_ma50 == "above",
+        price_vs_ema50 == "above",
         price_vs_vwap == "above",
     ])
     bear_count = sum([
         macd_dir == "bearish",
         bb_state == "expanding_down",
-        price_vs_ma50 == "below",
+        price_vs_ema50 == "below",
         price_vs_vwap == "below",
     ])
 
@@ -166,7 +166,7 @@ def _build_view(bundle: IndicatorBundle) -> TimeframeView:
         signal=signal,
         macd_dir=macd_dir,
         bb_state=bb_state,
-        price_vs_ma50=price_vs_ma50,
+        price_vs_ema50=price_vs_ema50,
         price_vs_vwap=price_vs_vwap,
         weight=_TF_WEIGHTS.get(bundle.timeframe, 1.0),
     )

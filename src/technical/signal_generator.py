@@ -389,15 +389,23 @@ def generate(
         else:
             rationale.append(f"[-] VWAP: lado errado")
 
-    # 5. MA50/MA100 trend alignment
-    if bundle.ma50 > 0 and bundle.ma100 > 0:
-        ma_ok = (bias == SIGNAL_BUY and price > bundle.ma50 > bundle.ma100) or \
-                (bias == SIGNAL_SELL and price < bundle.ma50 < bundle.ma100)
-        if ma_ok:
+    # 5. EMA alignment (20/50/100) — exige alinhamento perfeito das 3 EMAs
+    ema20, ema50, ema100 = bundle.ema20, bundle.ema50, bundle.ema100
+    if ema20 > 0 and ema50 > 0 and ema100 > 0:
+        ema_bull = ema20 > ema50 > ema100
+        ema_bear = ema20 < ema50 < ema100
+        if bias == SIGNAL_BUY and ema_bull:
             confirms += 1
-            rationale.append("[+] MA50>MA100: tendencia alinhada")
+            rationale.append("[+] EMA:aligned_bull(20>50>100)")
+        elif bias == SIGNAL_SELL and ema_bear:
+            confirms += 1
+            rationale.append("[+] EMA:aligned_bear(20<50<100)")
+        elif bias == SIGNAL_BUY and ema50 > ema100:
+            rationale.append("[~] EMA:partial_bull(50>100,20 lagging)")
+        elif bias == SIGNAL_SELL and ema50 < ema100:
+            rationale.append("[~] EMA:partial_bear(50<100,20 lagging)")
         else:
-            rationale.append("[-] MA: tendencia nao alinhada")
+            rationale.append("[-] EMA:misaligned")
 
     # 6. Fair price proximity (good entry zone)
     if fair_price > 0:

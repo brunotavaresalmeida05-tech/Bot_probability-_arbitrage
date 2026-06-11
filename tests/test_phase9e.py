@@ -785,3 +785,98 @@ class TestAnalyzeFamily:
         fam = self._fam()
         r = analyze_family(fam, _bundle_with("bullish"), _bundle_with("bullish"))
         assert r.family_name == "S&P500"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# I. EMA ALIGNMENT — indicators + regime_router + signal_generator
+# ══════════════════════════════════════════════════════════════════════════════
+
+from src.technical.indicators import compute_bundle as _compute_bundle
+from src.engine.regime_router import detect as regime_detect, RegimeState
+
+
+class TestEMABundle:
+
+    def test_ema_fields_present(self):
+        df = _up(200)
+        b = _compute_bundle("EURUSD", "M5", df)
+        assert hasattr(b, "ema20")
+        assert hasattr(b, "ema50")
+        assert hasattr(b, "ema100")
+
+    def test_ema_values_positive(self):
+        df = _up(200)
+        b = _compute_bundle("EURUSD", "M5", df)
+        assert b.ema20 > 0
+        assert b.ema50 > 0
+        assert b.ema100 > 0
+
+    def test_ema20_more_reactive_than_ema100(self):
+        # In strong uptrend ema20 > ema50 > ema100
+        df = _up(300)
+        b = _compute_bundle("EURUSD", "M5", df)
+        assert b.ema20 >= b.ema100
+
+    def test_ema20_more_reactive_downtrend(self):
+        # In strong downtrend ema20 < ema100
+        df = _down(300)
+        b = _compute_bundle("EURUSD", "M5", df)
+        assert b.ema20 <= b.ema100
+
+    def test_ema_fallback_short_data(self):
+        # 30 bars: EWM still converges (no fixed lookback), no crash
+        df = _flat(30)
+        b = _compute_bundle("EURUSD", "M5", df)
+        assert b.ema20 > 0
+        assert b.ema50 > 0
+        assert b.ema100 > 0
+
+    def test_no_ma50_ma100_fields(self):
+        df = _up(200)
+        b = _compute_bundle("EURUSD", "M5", df)
+        assert not hasattr(b, "ma50")
+        assert not hasattr(b, "ma100")
+
+
+class TestEMARegimeVotes:
+
+    def _b(self, ema20, ema50, ema100, adx=30.0, macd_dir="flat", atr_dir="flat"):
+        from src.technical.indicators import IndicatorBundle, MACDResult, ATRStopResult
+        from src.macro.macro_context import MacroContext
+        b = IndicatorBundle("EURUSD", "M15")
+        b.ema20 = ema20; b.ema50 = ema50; b.ema100 = ema100
+        b.adx = adx
+        b.macd = MACDResult(macd_line=0.0, signal_line=0.0, direction=macd_dir)
+        b.atr_stop = ATRStopResult(value=1.08, direction=atr_dir)
+        return b
+
+    def test_full_bull_alignment_gives_trending_up(self):
+        b = self._b(1.105, 1.100, 1.090, adx=30.0)
+        r = regime_detect(b)
+        assert r.state == RegimeState.TRENDING_UP
+        assert r.direction == "bullish"
+
+    def test_full_bear_alignment_gives_trending_down(self):
+        b = self._b(1.075, 1.080, 1.100, adx=30.0)
+        r = regime_detect(b)
+        assert r.state == RegimeState.TRENDING_DOWN
+        assert r.direction == "bearish"
+
+    def test_ema_aligned_confidence_bonus(self):
+        # adx=28 → base conf=0.70, ema_aligned → +0.10 → 0.80
+        b = self._b(1.105, 1.100, 1.090, adx=28.0)
+        r = regime_detect(b)
+        assert r.confidence >= 0.79
+
+    def test_ema_not_aligned_no_bonus(self):
+        # ema20 between ema50 and ema100 → not aligned
+        b = self._b(1.095, 1.100, 1.090, adx=28.0)
+        r = regime_detect(b)
+        assert r.confidence == pytest.approx(0.70, abs=0.01)
+
+    def test_equal_emas_no_vote(self):
+        # Equal EMAs → no EMA votes → only MACD/ATR (both flat → neutral → RANGING)
+        b = self._b(1.100, 1.100, 1.100, adx=30.0)
+        r = regime_detect(b)
+        assert r.direction == "neutral"
+        assert r.state == RegimeState.RANGING

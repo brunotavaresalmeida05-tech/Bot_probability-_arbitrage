@@ -72,8 +72,9 @@ class IndicatorBundle:
     bollinger: BollingerResult | None = None
     atr_stop: ATRStopResult | None = None
     vwap: float = 0.0
-    ma50: float = 0.0
-    ma100: float = 0.0
+    ema20: float = 0.0   # EMA(20) — timing curto prazo
+    ema50: float = 0.0   # EMA(50) — estrutura médio prazo
+    ema100: float = 0.0  # EMA(100) — estrutura longo prazo
     weis_wave: float = 0.0  # cumulative volume delta (Weis Wave proxy)
     atr: float = 0.0
     rsi: float = 50.0       # RSI(14); 50.0 = neutro por defeito
@@ -87,6 +88,13 @@ class IndicatorBundle:
 
 def _ema(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(span=period, adjust=False).mean()
+
+
+def _ema_scalar(closes: pd.Series, period: int) -> float:
+    """Last value of EMA(period); falls back to last close if NaN."""
+    result = closes.ewm(span=period, adjust=False).mean().iloc[-1]
+    val = float(result) if not np.isnan(result) else float(closes.iloc[-1])
+    return round(val, 5)
 
 
 def macd(
@@ -338,8 +346,9 @@ def compute_bundle(
     bundle.bollinger = bollinger(closes, period=10, prev_width=prev_bb_width)
     bundle.atr_stop = atr_stop_indicator(highs, lows, closes)
     bundle.vwap = vwap(closes, volumes)
-    bundle.ma50 = sma(closes, 50) if len(closes) >= 50 else 0.0
-    bundle.ma100 = sma(closes, 100) if len(closes) >= 100 else 0.0
+    bundle.ema20  = _ema_scalar(closes, 20)
+    bundle.ema50  = _ema_scalar(closes, 50)
+    bundle.ema100 = _ema_scalar(closes, 100)
     bundle.weis_wave = weis_wave(closes, volumes)
     bundle.atr = atr(highs, lows, closes)
     bundle.rsi = rsi_14(closes)
