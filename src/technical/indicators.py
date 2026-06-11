@@ -6,17 +6,14 @@ Technical Indicators — V9
 
 Hierarquia de 4 camadas (conforme metodologia de trading):
 
-  Camada 1 — Principal (base da decisão técnica → MCS, BCS, HCS no TotalScore)
+  Camada 1 — Principal (base da decisão técnica → MCS, BCS no TotalScore)
     MACD           — direção, momentum e cumprimento de movimento
     Bollinger Bands (10 períodos) — compressão, expansão e extremos de volatilidade
-    Hi-Lo Activator — range da sessão e pontos por cumprir
     ATR Stop (Chandelier Exit) — stop dinâmico e leitura numérica de volatilidade → RS
 
   Camada 2 — Confirmação intradiária (filtros binários → gate de confirmações)
     VWAP           — preço justo intradiário e equilíbrio de fluxo
-    EMA 8          — timing e pullback curto
     SMA 50 / SMA 100 — estrutura e tendência de preço
-    Parabolic SAR  — mudança curta de direção e apoio a stop técnico
 
   Camada 3 — Participação (reforço de CS / filtros binários)
     Weis Wave / Volume — confirmação de força real do movimento
