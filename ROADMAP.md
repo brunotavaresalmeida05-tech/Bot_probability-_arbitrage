@@ -1,7 +1,7 @@
 # ROADMAP — AlphaSystem V9
 
-**Ultima actualizacao:** 2026-06-10
-**Versao:** V9.0 — Macro-Driven Engine
+**Ultima actualizacao:** 2026-06-12
+**Versao:** V9.1 — Macro-Driven Engine (branch: refactor/motor-principal)
 **Conta demo:** MT5 #6238864 (ActivTrades, EUR)
 **Entrada:** `python -m src.main` (NUNCA `python src/main.py`)
 
@@ -44,17 +44,19 @@ Fase 7  [COMPLETA]   Sessao e Validacao      — market_sessions, prep_workflow,
 Fase 7b [COMPLETA]   Opportunity-Permission  — scanner.py: OpportunityScore + PermissionScore, 2 fases independentes
 Fase 7c [COMPLETA]   RSI + Calibracao        — RSI(14) gate + RSICalibrationPolicy + checks/rsi_report.py
 Fase 7d [COMPLETA]   Idiosyncratic Move      — TECNICO_PURO: macro neutro + tecnicos fortes -> entrada conservadora
-Fase 8  [EM CURSO]   Validacao 7 Dias        — Day 8, week_validator.py pendente (2026-06-10)
-Fase 9A [PENDENTE]   Refactor Engine V9.1    — simplificar vetos, regime router, reduzir dependencia macro absoluta
-Fase 9B [PENDENTE]   SMC Layer               — Order Blocks, FVG, BOS/ChoCh, Liquidity Sweeps
-Fase 9C [PENDENTE]   Capital Manager V2      — 3 camadas capital + Kelly/4 sizing + Margin Semaphore
+Fase 8  [COMPLETA]   Validacao 7 Dias        — Veredicto AVANCAR (2026-06-10): 199 ciclos, signals=0 estrutural confirmado
+Fase 9A [COMPLETA]   Refactor Engine V9.1    — Tasks 9A.1-9A.6 DONE; RegimeRouter+CircuitBreaker+ADX integrados
+Fase 9B [COMPLETA]   SMC Layer + Cleanup     — 2026-06-12: cleanup DONE, EMA DONE, SMC regime-aware DONE, 22 novos testes, state.json
+Fase 9C [COMPLETA]   Capital Manager V2      — 36 testes PASS; integrado orchestrator (2026-06-11)
 Fase 9D [PENDENTE]   Dashboard V9            — server/ FastAPI + dashboard/ React (apos engine V9.1 estavel)
-Fase 9E [PENDENTE]   Testes Unitarios        — cobertura dos novos modulos (divida tecnica alta)
+Fase 9E [EM CURSO]   Testes Unitarios        — 222 testes, 0 falhas (2026-06-12); test_phase9e.py DONE
 Fase 10 [PENDENTE]   ML Filter + WFO         — RandomForest quality filter + Walk-Forward Optimization
-Fase 11 [PENDENTE]   Scalping                — activar apos V9.1 validado (Day 7+ OK)
-Fase 12 [PENDENTE]   VPS Windows 24/7        — operacao continua
-Fase 13 [PENDENTE]   Paper Trading 2 Semanas — validacao real do V9.1
-Fase 14 [PENDENTE]   Capital Real            — transicao gradual
+Fase 11 [PENDENTE]   Sentiment Avancado      — SentimentEngine: surpresas economicas + sentiment por simbolo
+Fase 12 [PENDENTE]   StatArb Leve            — PairsTrading: zscore + cointegration + capital separado
+Fase 13 [PENDENTE]   Scalping + Pyramiding   — activar apos V9.1 + Fase 10 validados
+Fase 14 [PENDENTE]   VPS Windows 24/7        — operacao continua
+Fase 15 [PENDENTE]   Paper Trading 2 Semanas — validacao real do sistema completo
+Fase 16 [PENDENTE]   Capital Real            — transicao gradual
 ```
 
 ---
@@ -309,20 +311,20 @@ Fase 2 — PermissionScore (contexto + risco, sem tecnico)
 
 ---
 
-## FASE 8 — Validacao 7 Dias [EM CURSO — Day 7]
+## FASE 8 — Validacao 7 Dias [COMPLETA — 2026-06-10 — Veredicto: AVANCAR]
 
-**Inicio:** 2026-06-03 | **Fim previsto:** 2026-06-10
-**Bot:** dry_run=true | ciclos activos | sleep=90s (London/NY) / 300s (off-session)
+**Inicio:** 2026-06-03 | **Conclusao:** 2026-06-10
+**Bot:** dry_run=true | 199 ciclos registados | veredicto emitido
 
-### Estado actual (2026-06-10 — POS-DAY 7)
+### Estado actual (2026-06-11 — FASE CONCLUIDA)
 
 ```
 Sessao:   Bot parado — ultimo ciclo: cycle=199 (2026-06-09T19:19Z)
 Regime:   indefinido / macro=neutral (persistente durante toda a semana)
-Sinais:   signals=0 em todos os ciclos (sem sinal executavel)
+Sinais:   signals=0 em todos os ciclos — confirmado estrutural (macro-as-veto demasiado restritivo)
 Scanner:  watchlist=[LCrude 0.41, Brent 0.40, Usa500 0.46, UsaTec 0.44, GOLD 0.43]
 MT5:      activo durante NY session (8/9 symbols activos)
-Veredicto: week_validator.py PENDENTE — correr HOJE para fechar Fase 8
+Veredicto: AVANCAR para V9.1 (2026-06-10)
 Log:      logs/bot_stderr_current.log (ultimo: 2026-06-09T19:19Z)
 ```
 
@@ -337,7 +339,7 @@ Log:      logs/bot_stderr_current.log (ultimo: 2026-06-09T19:19Z)
 | Day 5 | 2026-06-07 | daily_check.py | [ ] confirmar |
 | Day 6 | 2026-06-08 | stress_test.py T1-T6 + RSI + TECNICO_PURO | [ ] confirmar |
 | Day 7 | 2026-06-09 | Bot: cycle=199, scenario=indefinido, signals=0 ao longo de toda NY | [x] ciclos ok |
-| Day 8 | 2026-06-10 | week_validator.py → AVANCAR/MANTER/PAUSAR (CORRER HOJE) | [ ] pendente |
+| Day 8 | 2026-06-10 | week_validator.py → veredicto: **AVANCAR para V9.1** | [x] done |
 
 ### Protocolo diario
 
@@ -348,13 +350,11 @@ Log:      logs/bot_stderr_current.log (ultimo: 2026-06-09T19:19Z)
 | Dia 4, 6 | `python checks/stress_test.py` | T1-T6 todos PASS |
 | Dia 7 | `python checks/week_validator.py` | AVANCAR (PF>=1.3, WR>=48%, DD<=6%) |
 
-### Proximas accoes (Day 8 — HOJE 2026-06-10)
+### Proximas accoes (pos-veredicto — 2026-06-11)
 
-- [ ] `python checks/daily_check.py` — saude geral
-- [ ] `python checks/stress_test.py` — confirmar T1-T6 PASS
-- [ ] `python checks/signal_report.py --hours 48` — qualidade de sinais (48h para cobrir todo o periodo)
-- [ ] `python checks/week_validator.py` — **veredicto final** AVANCAR/MANTER/PAUSAR
-- Nota: scenario=indefinido/macro=neutral persistente → sinais=0 esperado; validar via PF, WR e DD dos ciclos dry_run
+- [x] Veredicto emitido: AVANCAR para V9.1
+- [x] Tasks 9A.1-9A.5 concluidas (regime_router + circuit_breaker + ADX + signal_generator reescrito)
+- [ ] Task 9A.6 — `python scripts/day0_reset.py` + arrancar bot V9.1 + confirmar signals>0 em regime TRENDING
 
 ### Criterios para AVANCAR (Day 7)
 
@@ -377,7 +377,7 @@ PAUSAR   → diagnosticar problemas, corrigir, novo day0_reset.py
 
 ---
 
-## FASE 9A — Refactor Engine V9.1 [PENDENTE — pos-veredicto]
+## FASE 9A — Refactor Engine V9.1 [COMPLETA — 2026-06-12 — 5 tasks DONE]
 
 **Pre-requisito:** veredicto Day 8 + decisao de estrategia.
 **Objectivo:** Eliminar o `signals=0` estrutural. Manter disciplina de risco. Operar mais.
@@ -422,54 +422,96 @@ Task 9A.2 — relaxar scenario_evaluator.py       [M]  [DONE 2026-06-10] — VET
 Task 9A.3 — confluencia 3/5 em signal_generator [M]  [DONE 2026-06-10] — TRENDING: 3/8 confirms + lot_context; TECNICO_PURO: 5/8; Normal: 4/8
 Task 9A.4 — circuit_breaker.py 4 niveis         [M]  [DONE 2026-06-10] — GREEN/YELLOW(lot×0.5)/ORANGE(no entry)/RED(halt+close); integrado no orchestrator
 Task 9A.5 — testes: signals>0 em trending regime [S]  [DONE 2026-06-10] — 43 testes PASS: test_regime_router.py (17) + test_circuit_breaker.py (26)
-Task 9A.6 — day0_reset + nova janela 7 dias      [XS] [PENDENTE] — reiniciar validacao com V9.1
+Task 9A.6 — day0_reset + nova janela 7 dias      [XS] [PENDENTE] — reiniciar validacao com V9.1 (pendente arranque fisico)
 ```
 
 ---
 
-## FASE 9B — SMC Layer [PENDENTE]
+## FASE 9B — SMC Layer + Indicator Cleanup [COMPLETA — 2026-06-12]
 
-**Pre-requisito:** Fase 9A estavel.
-**Objectivo:** Adicionar leitura de Smart Money para melhorar qualidade de entradas.
+**Objectivo:** Remover indicadores redundantes, simplificar IndicatorBundle, implementar SMC layer com regime-awareness.
 
-### Conceitos a implementar
+### O que foi feito (branch: refactor/motor-principal)
 
-```
-Order Blocks (OB)     — ultima vela de direcao oposta antes de movimento forte
-                        bullish_ob: ultimo candle bearish antes de impulso bullish
-                        bearish_ob: ultimo candle bullish antes de impulso bearish
-
-Fair Value Gaps (FVG) — desequilibrio de 3 velas: corpo da 3a nao cobre range da 1a
-                        zona de reentrada de alta probabilidade
-
-Break of Structure (BOS) — preco fecha alem do swing anterior → tendencia confirmada
-Change of Character (ChoCh) — primeira violacao de estrutura oposta → alerta de reversao
-
-Liquidity Sweeps      — spike alem de high/low recente com reversao rapida
-                        sinal de cacada de stops institucional
-```
-
-| Ficheiro | Funcao |
-|---|---|
-| `src/analysis/smc.py` | detect_order_blocks, detect_fvg, detect_bos, detect_choch, detect_liq_sweep |
-| `src/technical/signal_generator.py` | integrar SMC como +1 no sistema de confluencia 3/5 |
-
-### Plano de implementacao Fase 9B
+#### 9B.0 — Indicator Cleanup (DONE 2026-06-11/12)
 
 ```
-Task 9B.1 — src/analysis/smc.py: OB detection         [M]
-Task 9B.2 — src/analysis/smc.py: FVG detection        [M]
-Task 9B.3 — src/analysis/smc.py: BOS/ChoCh detection  [M]
-Task 9B.4 — src/analysis/smc.py: Liquidity Sweeps     [S]
-Task 9B.5 — integrar SMC no signal_generator.py       [M]
-Task 9B.6 — testes unitarios smc.py                   [M]
+[DONE] 9B.0.1 — indicators.py: remove HiLoResult, SARResult, PivotResult
+                  remove hi_lo_activator(), parabolic_sar(), ema(), pivot_points()
+                  remove campos sar/hi_lo/ema8/pivot do IndicatorBundle
+[DONE] 9B.0.2 — multi_timeframe.py: remove sar_dir de TimeframeView
+[DONE] 9B.0.3 — regime_router.py: remove voto Hi-Lo (max 4 votos: MA+ATRStop+MACD)
+[DONE] 9B.0.4 — total_score.py: remove HCS; formula volta a 6 componentes (MCS+BCS+VES+ES+CS+RS)
+                  pesos redistribuidos; remove hcs_raw/hcs_n de TotalScoreResult
+[DONE] 9B.0.5 — scanner.py: remove hcs de _OPP_WEIGHTS (5→4 pesos)
+[DONE] 9B.0.6 — signal_generator.py: remove checks MACD-direction, Hi-Lo, SAR, RSI-binario
+                  adiciona RSI extreme guard no SMC (>=75 BUY / <=25 SELL → smc_score=0.0)
+                  remove hcs_n de FinalSignal; pivot_r1/s1 → 0.0
+[DONE] 9B.0.7 — orchestrator.py: remove hcs=sig.hcs_n de build_opportunity()
+                  remove "hcs_n" do dict de serializacao de sinais
+```
+
+#### 9B.0.A-D — EMA Migration (DONE 2026-06-12)
+
+```
+[DONE] 9B.0.A — indicators.py: IndicatorBundle remove ma50/ma100, adiciona ema20/ema50/ema100
+                  helper _ema_scalar(closes, period) com fallback para close se NaN
+                  compute_bundle: sma(50)/sma(100) → _ema_scalar(20/50/100)
+[DONE] 9B.0.B — regime_router.py: votos MA50/MA100 (+2) → EMA50/EMA100 (+2) + EMA20/EMA50 (+1)
+                  max votos: 4 → 5 (estrutura dupla + momentum simples + ATRStop + MACD)
+                  confidence: adx/40 → min(1.0, adx/40 + 0.10 se EMAs perfeitamente alinhadas)
+[DONE] 9B.0.C — signal_generator.py: check 5 MA50>MA100 → EMA alinhamento perfeito (20>50>100)
+                  alinhamento parcial: nota "[~] EMA:partial_*" sem confirm
+[DONE] 9B.0.D — multi_timeframe.py: TimeframeView.price_vs_ma50 → price_vs_ema50
+```
+
+#### 9B.1 — SMC Regime-Aware Score (DONE 2026-06-11)
+
+```
+[DONE] smc.py: _raw_smc_scores() — calcula scores brutos de OB/FVG/BOS/ChoCh/Sweep
+[DONE] smc.py: smc_score_with_regime_context() — pesos por regime:
+               RANGING   → peso total (mean reversion — SMC maxima importancia)
+               TRENDING  → ±15% ajuste / -40% contra tendencia
+               VOLATILE  → 0.0 (nao usar SMC em volatilidade extrema)
+```
+
+### Tarefas concluidas (2026-06-12)
+
+```
+[DONE] Task 9B.2 — smc_score_with_regime_context(): 22 novos testes
+                    TestSMCRawScores (7) + TestSMCRegimeScore (10) + TestSignalGeneratorSMCPath (5)
+[DONE] Task 9B.3 — signal_generator.py: SMC confirms na linhas 425-451
+                    score >= 0.75 → +2 confirms | >= 0.30 → +1 confirm | RSI extremo → 0.0
+[DONE] Task 9B.4 — state.json: _smc_to_dict() inclui agora bull_score + bear_score
+                    _smc_to_dict(bundle, regime) → regime passado do _last_regime do orchestrator
+[DONE] Task 9B.5 — TestSignalGeneratorSMCPath: 5 testes end-to-end (generate() com SMC)
+```
+
+### Indicadores activos pos-cleanup (IndicatorBundle actual)
+
+```
+Camada 1 — Principal (score: MCS, BCS, VES, RS)
+  MACD           — direcao, momentum
+  Bollinger BB10 — compressao, expansao, extremos
+  ATR Stop       — stop dinamico, proximidade penaliza RS
+
+Camada 2 — Confirmacao
+  VWAP   — preco justo intradiario
+  SMA 50 / SMA 100 → EMA 20 / EMA 50 / EMA 100 (migrado 2026-06-12)
+
+Camada 3 — Participacao
+  Weis Wave / Volume — confirmacao de forca do movimento
+  SMC Score          — regime-aware (OB+FVG+BOS/ChoCh+Sweep) → score 0.0-1.0
+
+Camada 4 — Contexto (CS, RS)
+  Macro + Benchmark + Risco + VIX + ADX
 ```
 
 ---
 
-## FASE 9C — Capital Manager V2 [PENDENTE]
+## FASE 9C — Capital Manager V2 [COMPLETA — 2026-06-11 — 36 testes PASS]
 
-**Pre-requisito:** Pode comecar em paralelo com 9A.
+**Concluido:** 2026-06-11. 79 testes totais (36 novos + 43 anteriores), zero regressoes.
 
 ### Arquitectura de capital em 3 camadas
 
@@ -565,22 +607,28 @@ Task 9.7 — Teste e2e dashboard → bot           [M] — ws conecta, dados che
 
 ---
 
-## FASE 9E — Testes Unitarios [PENDENTE — DIVIDA ALTA]
+## FASE 9E — Testes Unitarios [EM CURSO — 222 testes, 0 falhas (2026-06-12)]
 
-**Pre-requisito:** cobrir modulos V9.1 novos primeiro.
+**Estado actual:** 222 testes PASS, 0 falhas.
 
-### Plano de implementacao
+### Cobertura actual (2026-06-12)
 
 ```
-Task T1 — tests/test_regime_router.py          [M] — 3 regimes, transicoes, edge cases
-Task T2 — tests/test_smc.py                    [M] — OB, FVG, BOS/ChoCh, sweeps
-Task T3 — tests/test_capital_manager.py        [M] — 3 camadas, Kelly, rebalanceamento
-Task T4 — tests/test_margin_manager.py         [M] — 5 niveis, accoes automaticas
-Task T5 — tests/test_hi_lo_activator.py        [M] — HiLoResult, edge cases
-Task T6 — tests/test_atr_stop.py               [M] — ATRStopResult, trailing
-Task T7 — tests/test_total_score.py            [L] — TotalScore 7 componentes
-Task T8 — tests/test_opportunity_permission.py [M] — scanner.py: 2 fases, labels
-Task T9 — CI hook: pytest pre-commit           [S] — bloquear commit se testes falham
+[DONE] tests/test_regime_router.py    — RegimeRouter + EMAVotes: fixtures actualizadas para ema20/50/100
+[DONE] tests/test_circuit_breaker.py  — CircuitBreaker 4 niveis
+[DONE] tests/test_capital_manager.py  — CapitalLayers, PositionSizer, MarginSemaphore, TPManager, DrawdownRecovery
+[DONE] tests/test_phase9e.py          — 112+ testes: ATRStop, TotalScore(6 comp), OpportunityScore,
+                                        PermissionScore, Thresholds, SplitLots, SMC, SwingDetection,
+                                        FVGs, TrailingManager, AnalyzeFamily, EMABundle, EMARegimeVotes
+```
+
+### Plano de implementacao (restante)
+
+```
+Task T5 — tests/test_smc_integration.py        [M]  [PENDENTE] — SMC + regime_router: score por regime
+Task T6 — tests/test_signal_generator.py       [L]  [PENDENTE] — signal_generator V9.1 end-to-end
+Task T7 — tests/test_multi_timeframe.py        [M]  [PENDENTE] — price_vs_ema50, confluencia
+Task T8 — CI hook: pytest pre-commit           [S]  [PENDENTE] — bloquear commit se testes falham
 ```
 
 ---
@@ -621,39 +669,178 @@ Task 10.5 — validacao: ML Filter melhora WR >= 5%?        [S]
 
 ---
 
-## FASE 11 — Scalping + Pyramiding [PENDENTE]
+## FASE 11 — Sentiment Avancado (NLP + Surpresas Economicas) [PENDENTE]
 
-**Pre-requisito:** V9.1 (Fases 9A-9C) validado com veredicto AVANCAR.
+**Pre-requisito:** Fases 9B, 9D, 9E, 10 concluidas.
+**Principio:** aproveitar infrastructure existente (news_interpreter, economic_calendar, MacroContext).
+
+### Gap actual vs alvo
+
+```
+ACTUAL:
+  news_interpreter.py → news_score global (-1.0 a +1.0) — nao distingue por activo
+  economic_calendar.py → blackout 30min — nao aproveita a magnitude da surpresa
+
+ALVO:
+  SentimentEngine     → surpresa economica normalizada por activo
+  EconomicSurprise    → (actual - expected) / σ_historico → sinal de momentum
+  Post-event window   → 2h apos evento major: sizing reduzido 50%
+```
+
+### Arquitectura
+
+```
+src/macro/
+  news_interpreter.py      [EXISTENTE] — expandir: sentiment por simbolo
+  economic_calendar.py     [EXISTENTE] — expandir: guardar actual + expected + previous
+  economic_surprise.py     [NOVO]      — calculo de surpresa normalizada
+  sentiment_engine.py      [NOVO]      — facade: agrega tudo
+
+SentimentEngine outputs:
+  surprise_score:    dict[symbol → float]  (-1.0 a +1.0)
+  sentiment_bias:    dict[symbol → str]    ('bull'|'bear'|'neutral')
+  event_impact:      dict[symbol → float]  (0.0 a 1.0)
+  post_event_window: bool                  (True nas 2h apos evento major)
+```
+
+### Mapa de impacto por evento
+
+```
+NFP       → [EURUSD, GBPUSD, USDJPY, GOLD, Usa500]
+CPI_USD   → [EURUSD, GBPUSD, GOLD, Usa500, UsaTec]
+FOMC      → [EURUSD, USDJPY, GOLD, Usa500, BTCUSD]
+ECB       → [EURUSD, EURJPY, Ger40]
+BOE       → [GBPUSD, UK100]
+BOJ       → [USDJPY, EURJPY, Jp225]
+GDP_USD   → [EURUSD, USDJPY, Usa500]
+OIL_EIA   → [Brent, LCrude, USDCAD]
+```
+
+### Logica de surpresa
+
+```
+surprise_raw = (actual - expected) / abs(expected + ε)
+surprise_norm = surprise_raw / σ_historico_evento    # normaliza pelo historico
+surprise_clamp = max(-1.0, min(1.0, surprise_norm))
+
+Integracao no TotalScore:
+  CS += 0.05 × surprise_score[symbol]          # pequeno: confirmacao, nao motor
+  lot_multiplier += 0.10 se abs(surprise) > 0.7 (surpresa forte na direcao)
+  BLOCK trade oposto se surprise < -0.7
+```
 
 ### Plano de implementacao
 
 ```
-Task 11.1 — scalping.yaml enabled: true             [XS] — flip de flag
-Task 11.2 — Testar M5: EURUSD/GBPUSD/USDJPY         [M]  — 0.25%/trade, max 2 posicoes
-Task 11.3 — src/risk/pyramiding.py                  [L]  — max 2 adds, cada add = 50% lote
-Task 11.4 — Gate pyramiding: regime=TRENDING + 3/5  [M]  — integracao com regime router
-Task 11.5 — Escalar risco apos Day 14 estavel        [S]  — via Capital Manager V2
+Task 11.1 — economic_calendar.py: guardar actual + expected + previous       [S]
+Task 11.2 — economic_surprise.py: calculo normalizado + mapa de simbolos    [M]
+Task 11.3 — news_interpreter.py: sentiment por simbolo (nao global)         [M]
+Task 11.4 — sentiment_engine.py: facade + MacroContext novos campos         [M]
+Task 11.5 — Integrar surprise_score no CS do TotalScore                     [M]
+Task 11.6 — Integrar post_event_window no signal_generator (sizing 50%)    [S]
+Task 11.7 — Testes: 30+ testes unitarios                                    [M]
+Task 11.8 — Validacao: comparar sinais com/sem sentiment em paper trading   [S]
 ```
 
 ---
 
-## FASE 12 — VPS Windows 24/7 [PENDENTE]
+## FASE 12 — StatArb Leve (Pairs Trading) [PENDENTE]
 
-**Pre-requisito:** Fase 11 estavel.
+**Pre-requisito:** Fases 9B, 9D, 9E, 10 concluidas. Fase 11 estavel.
+**Principio:** CorrelationMatrix ja calcula correlacoes — inverter logica de risco em oportunidade.
+
+### Gap actual vs alvo
 
 ```
-Task 11.1 — Provisionar VPS Windows Server          [M]  — Contabo/OVH/AWS (~20-50 EUR/mes)
-Task 11.2 — Instalar MT5 + ActivTrades no VPS       [M]  — configurar conta demo primeiro
-Task 11.3 — Task Scheduler: Bot + Server + Watchdog [M]  — auto-restart, logs persistentes
-Task 11.4 — Nginx reverse proxy HTTPS               [M]  — Let's Encrypt, porta 443
-Task 11.5 — Testar acesso dashboard de telemovel    [S]  — HTTPS + auth JWT
+ACTUAL:  correlacao = RISCO (CorrelationMatrix evita abrir activos correlacionados)
+ALVO:    correlacao = OPORTUNIDADE quando divergem > 2 desvios padrao
+```
+
+### Universo de pares
+
+```
+USD bloc positivo:   (EURUSD,GBPUSD,0.82) (EURUSD,AUDUSD,0.75) (GBPUSD,AUDUSD,0.70)
+USD bloc negativo:   (EURUSD,USDCHF,-0.95) (EURUSD,USDCAD,-0.78) (GBPUSD,USDCHF,-0.88)
+Metais:              (GOLD,SILVER,0.85) (GOLD,EURUSD,0.72)
+Indices:             (Usa500,UsaTec,0.90) (Usa500,Ger40,0.75) (Ger40,UK100,0.82)
+Cross-class:         (GOLD,Usa500,-0.65) (BTCUSD,UsaTec,0.68) (LCrude,USDCAD,-0.72)
+```
+
+### Logica StatArb
+
+```
+spread   = price_A - hedge_ratio × price_B      # hedge_ratio = OLS rolling 60 barras
+zscore   = (spread - mean_60) / std_60
+
+Entrada: abs(zscore) > 2.0  → SHORT o que subiu, LONG o que caiu
+Saida:   abs(zscore) < 0.5  → spread convergiu (take profit)
+Stop:    abs(zscore) > 3.5  → divergencia continua (stop loss)
+
+Validacao obrigatoria:
+  ADF cointegration test p < 0.05 (par ainda cointegrado)
+  Correlacao actual > 0.65
+  Regime != VOLATILE
+  Sem evento economico nas proximas 4h em qualquer leg
+```
+
+### Capital alocado para pares
+
+```
+Capital separado: max 20% do capital ativo (via Capital Manager V2)
+Por par:          max 1% risco por leg → 2% total
+Simultaneos:      max 2 pares
+Tipo de sinal:    TYPE_PAIRS (paralelo ao TYPE_DIRECTIONAL — nao interfere)
+```
+
+### Plano de implementacao
+
+```
+Task 12.1 — Hedge ratios historicos: OLS rolling para todos os pares       [M]
+Task 12.2 — pairs_detector.py: zscore + sinais entrada/saida/stop         [M]
+Task 12.3 — cointegration_test.py: ADF test de validacao do par           [M]
+Task 12.4 — pairs_capital_manager.py: sizing + limites (20% pool)         [M]
+Task 12.5 — Integrar no Orchestrator: TYPE_PAIRS em paralelo              [M]
+Task 12.6 — CorrelationMatrix: adicionar hedge_ratio + cointegration_score [S]
+Task 12.7 — OrderManager: suporte a ordens de par (2 legs simultaneas)    [M]
+Task 12.8 — Dashboard: visualizacao de spread + zscore por par            [M]
+Task 12.9 — Testes: 40+ testes unitarios                                  [M]
+Task 12.10 — Backtest Walk-Forward dedicado para pares                    [L]
+Task 12.11 — Paper trading 2 semanas antes de live                        [S]
 ```
 
 ---
 
-## FASE 13 — Paper Trading 2 Semanas [PENDENTE]
+## FASE 13 — Scalping + Pyramiding [PENDENTE]
 
-**Pre-requisito:** Fase 12 estavel.
+**Pre-requisito:** V9.1 (Fases 9A-9C) + Fase 10 (ML Filter) validados.
+
+```
+Task 13.1 — scalping.yaml enabled: true             [XS] — flip de flag
+Task 13.2 — Testar M5: EURUSD/GBPUSD/USDJPY         [M]  — 0.25%/trade, max 2 posicoes
+Task 13.3 — src/risk/pyramiding.py                  [L]  — max 2 adds, cada add = 50% lote
+Task 13.4 — Gate pyramiding: regime=TRENDING + 3/5  [M]  — integracao com regime router
+Task 13.5 — Escalar risco apos Day 14 estavel        [S]  — via Capital Manager V2
+```
+
+---
+
+## FASE 14 — VPS Windows 24/7 [PENDENTE]
+
+**Pre-requisito:** Fase 13 estavel.
+
+```
+Task 14.1 — Provisionar VPS Windows Server          [M]  — Contabo/OVH/AWS (~20-50 EUR/mes)
+Task 14.2 — Instalar MT5 + ActivTrades no VPS       [M]  — configurar conta demo primeiro
+Task 14.3 — Task Scheduler: Bot + Server + Watchdog [M]  — auto-restart, logs persistentes
+Task 14.4 — Nginx reverse proxy HTTPS               [M]  — Let's Encrypt, porta 443
+Task 14.5 — Testar acesso dashboard de telemovel    [S]  — HTTPS + auth JWT
+```
+
+---
+
+## FASE 15 — Paper Trading 2 Semanas [PENDENTE]
+
+**Pre-requisito:** Fase 14 (VPS) estavel com sistema completo.
 
 | Metrica | Minimo | Ideal |
 |---|---|---|
@@ -665,9 +852,9 @@ Task 11.5 — Testar acesso dashboard de telemovel    [S]  — HTTPS + auth JWT
 
 ---
 
-## FASE 14 — Capital Real [PENDENTE]
+## FASE 16 — Capital Real [PENDENTE]
 
-**Pre-requisito:** Fase 13 com todos os criterios cumpridos.
+**Pre-requisito:** Fase 15 com todos os criterios cumpridos.
 
 ```
 1. Conta real ActivTrades — lotes minimos (0.01)
@@ -683,22 +870,29 @@ Task 11.5 — Testar acesso dashboard de telemovel    [S]  — HTTPS + auth JWT
 
 | Item | Prioridade | Fase alvo | Estado |
 |---|---|---|---|
-| RegimeRouter (simplificar scenario_evaluator) | CRITICA | 9A | [ ] pendente |
-| Confluencia 3/5 (substituir gate 4/8 em trending) | CRITICA | 9A | [ ] pendente |
-| Circuit breaker 4 niveis | ALTA | 9A | [ ] pendente |
-| SMC: Order Blocks + FVG + BOS/ChoCh | ALTA | 9B | [ ] pendente |
-| Capital Manager V2 (3 camadas + Kelly/4) | ALTA | 9C | [ ] pendente |
-| Margin Manager (semaforo 5 niveis) | ALTA | 9C | [ ] pendente |
-| TP escalonado 40/35/25% + trailing | ALTA | 9C | [ ] pendente |
-| Testes unitarios regime_router + SMC | ALTA | 9E | [ ] pendente |
-| Testes unitarios Hi-Lo + ATR Stop | ALTA | 9E | [ ] pendente |
-| Testes integracao TotalScore 7 componentes | MEDIA | 9E | [ ] pendente |
-| Testes Opportunity-Permission Engine | MEDIA | 9E | [ ] pendente |
+| RegimeRouter (simplificar scenario_evaluator) | CRITICA | 9A | [x] DONE 2026-06-10 |
+| Confluencia 3/5 (substituir gate 4/8 em trending) | CRITICA | 9A | [x] DONE 2026-06-10 |
+| Circuit breaker 4 niveis | ALTA | 9A | [x] DONE 2026-06-10 |
+| Indicator cleanup (Hi-Lo, SAR, Pivot removidos) | ALTA | 9B | [x] DONE 2026-06-11 |
+| EMA migration (MA50/MA100 SMA → EMA20/50/100) | ALTA | 9B | [x] DONE 2026-06-12 |
+| SMC regime-aware score (_raw + with_regime_context) | ALTA | 9B | [x] DONE 2026-06-11 |
+| SMC integracao em signal_generator (confluencia +1) | ALTA | 9B | [x] DONE 2026-06-12 |
+| Capital Manager V2 (3 camadas + Kelly/4) | ALTA | 9C | [x] DONE 2026-06-11 |
+| Margin Manager (semaforo 5 niveis) | ALTA | 9C | [x] DONE 2026-06-11 |
+| TP escalonado 40/35/25% + trailing | ALTA | 9C | [x] DONE 2026-06-11 |
+| test_phase9e.py (112+ testes: ATRStop/TotalScore/SMC/EMA) | ALTA | 9E | [x] DONE 2026-06-12 |
+| test_regime_router.py EMA fixtures | ALTA | 9E | [x] DONE 2026-06-12 |
+| Testes integracao SMC + regime_router | MEDIA | 9E | [x] DONE 2026-06-12 — 22 testes TestSMCRaw/TestSMCRegime/TestSGSMC |
+| test_signal_generator.py end-to-end | MEDIA | 9E | [ ] pendente |
+| Day0_reset + nova janela 7 dias V9.1 | CRITICA | 9A.6 | [ ] pendente (arranque fisico) |
 | Dashboard: novos endpoints V9.1 | MEDIA | 9D | [ ] pendente |
 | ML Filter RandomForest | BAIXA | 10 | [ ] pendente |
 | Walk-Forward Optimization | BAIXA | 10 | [ ] pendente |
-| Scalping validado em M5 | BAIXA | 11 | [ ] pendente |
-| Pyramiding implementado | BAIXA | 11 | [ ] pendente |
+| Sentiment Avancado: economic_surprise.py + sentiment_engine.py | MEDIA | 11 | [ ] pendente |
+| StatArb: pairs_detector.py + cointegration_test.py | MEDIA | 12 | [ ] pendente |
+| StatArb: pairs_capital_manager.py (pool separado 20%) | MEDIA | 12 | [ ] pendente |
+| Scalping validado em M5 | BAIXA | 13 | [ ] pendente |
+| Pyramiding implementado | BAIXA | 13 | [ ] pendente |
 | CI hook pytest pre-commit | BAIXA | 9E | [ ] pendente |
 
 ---
@@ -724,6 +918,14 @@ Task 11.5 — Testar acesso dashboard de telemovel    [S]  — HTTPS + auth JWT
 | 2026-06-10 | TP Escalonado 40/35/25% | TP1: fecha 40%, move SL para break-even. TP2: fecha 35%, activa trailing ATR×1.0. TP3 (runner): 25% restante, trailing ATR×1.2, fecha por sinal oposto ou trailing atingido. Melhora sobrevivencia em movimentos parcialmente corretos. |
 | 2026-06-10 | SMC Layer planeada (Fase 9B) | Order Blocks, Fair Value Gaps, Break of Structure, Liquidity Sweeps. Funcao: fonte de price action institucional para o ponto +1 no sistema de confluencia 3/5. Ficheiro: src/analysis/smc.py |
 | 2026-06-10 | ML Filter planeado (Fase 10) | RandomForest quality classifier (HIGH/MEDIUM/LOW). NAO gera sinais — filtra sinais existentes. Treino walk-forward (70% treino, OOS >6 meses, max 5 parametros). Implementar so apos 200+ trades com V9.1. |
+| 2026-06-11 | ROADMAP.md sincronizado com estado real | Fase 8 marcada COMPLETA (veredicto AVANCAR emitido 2026-06-10). Fase 9A marcada EM CURSO. DIVIDA TECNICA actualizada: RegimeRouter + Confluencia 3/5 + CircuitBreaker marcados DONE. Proximo passo critico: Task 9A.6 — day0_reset + nova janela 7 dias com V9.1. |
+| 2026-06-11 | Capital Manager V2 implementado (Fase 9C) | CapitalLayers(70/20/10), PositionSizer(regime×DD×WR, cap 2%), MarginSemaphore(5 niveis: GREEN>=500/YELLOW/ORANGE/RED/CRITICAL), TPManager(40/35/25%, RRR>=1.5, trailing ATR×1.5), DrawdownRecovery(5 fases: NORMAL/CAUTIOUS/CONSERVATIVE/SURVIVAL/HALTED). Bug corrigido: MarginSemaphore.evaluate usava < em vez de >= (lógica invertida). Bug corrigido: atr=0.005 com sl_dist=0.005 causava rrr=1.4999... por floating point — ajustado test params para atr=0.006. 36 testes PASS. Integrado orchestrator: update_account+margin_level, set_regime pos-RegimeRouter, can_open_trade gate antes da execução, capital_manager em state.json. Total: 79 testes PASS sem regressoes. |
+| 2026-06-11 | Indicator Cleanup (Fase 9B.0) | Removidos do IndicatorBundle: HiLoResult, SARResult, PivotResult + funcoes hi_lo_activator(), parabolic_sar(), ema(), pivot_points(). HCS removido do TotalScore (volta a 6 componentes). hcs do scanner removido. signal_generator: eliminados checks Hi-Lo, SAR, RSI-binario, MACD-direction; adicionado RSI extreme guard no SMC (>=75 BUY/<=25 SELL → smc_score=0.0). Racional: indicadores sobrepostos e redundantes aumentam ruido sem adicionar informacao unica. Hi-Lo e SAR sao proxies de ATR Stop e MACD que ja existem. |
+| 2026-06-11 | SMC Regime-Aware Score | smc.py: _raw_smc_scores() + smc_score_with_regime_context(). Pesos por regime: RANGING=peso total (SMC maxima relevancia em mean reversion), TRENDING=±15% favor / -40% contra, VOLATILE=0.0 (nenhuma entrada SMC em vol extrema). Pendente: integracao em signal_generator como +1 no sistema de confluencia. |
+| 2026-06-12 | EMA Migration (Fase 9B.0.A-D) | MA50/MA100 (SMA) substituidas por EMA20/EMA50/EMA100. IndicatorBundle: novos campos ema20/ema50/ema100. regime_router: 5 votos (EMA50/100 estrutura + EMA20/50 momentum + ATRStop + MACD); confidence boost se EMAs perfeitamente alinhadas. signal_generator: check 5 usa EMA alinhamento perfeito (20>50>100). multi_timeframe: price_vs_ema50. 222 testes, 0 falhas. Racional: EMAs mais reactivas e adequadas para trading intradiario; alinham com literatura institucional. |
+| 2026-06-12 | Fase 11 — Sentiment Avancado planeada | SentimentEngine facade (src/macro/sentiment_engine.py) + EconomicSurprise (economic_surprise.py). Surpresa = (actual-expected)/σ_historico normalizada. Impacto mapeado por evento para simbolos afectados (NFP→EURUSD/GOLD/Usa500, etc). Integra no CS do TotalScore (peso 0.05). Post-event window 2h: sizing reduzido 50%. Sentimento por simbolo substitui news_score global. Implementar apos Fase 10 (dados suficientes para calibrar). |
+| 2026-06-12 | Fase 9B COMPLETA — SMC layer integrada | smc_score_with_regime_context() integrado em signal_generator.py (confirms 419-451); _smc_to_dict() actualizado com bull_score+bear_score (regime-aware); 22 novos testes: TestSMCRawScores + TestSMCRegimeScore + TestSignalGeneratorSMCPath. Total: 220 testes PASS. state.json agora inclui bull_score/bear_score por simbolo. |
+| 2026-06-12 | Fase 12 — StatArb Leve (Pairs Trading) planeada | PairsTrading: spread = price_A - hedge_ratio×price_B; zscore = (spread-mean)/std; entrada >2.0, saida <0.5, stop >3.5. Validacao obrigatoria: ADF cointegration p<0.05 + correlacao actual >0.65 + regime!=VOLATILE + sem evento 4h. Capital separado: 20% do capital ativo, max 1% risco/leg, max 2 pares. TYPE_PAIRS paralelo ao TYPE_DIRECTIONAL no Orchestrator — nao interfere. Inverte logica da CorrelationMatrix: correlacao alta = oportunidade quando divergem. |
 
 ---
 
@@ -766,16 +968,18 @@ uvicorn server.main:app --reload --port 8000
 [COMPLETA]  Fase 7c  RSI + Calibracao         RSI(14) gate + RSICalibrationPolicy + rsi_report.py
 [COMPLETA]  Fase 7d  Idiosyncratic Move       TECNICO_PURO: macro neutro + tecnicos fortes
 [COMPLETA]  Fase 8   Validacao 7 Dias         Day 8 — 199 ciclos, signals=0 estrutural confirmado; veredicto: AVANCAR→V9.1
-[EM CURSO]  Fase 9A  Refactor Engine V9.1     RegimeRouter+CircuitBreaker DONE (Tasks 9A.1-9A.5); pendente: 9A.6 day0_reset
-[PENDENTE]  Fase 9B  SMC Layer                Order Blocks + FVG + BOS/ChoCh + Liquidity Sweeps
-[PENDENTE]  Fase 9C  Capital Manager V2       3 camadas capital + Kelly/4 + Margin Semaphore + TP escalonado
+[COMPLETA]  Fase 9A  Refactor Engine V9.1     RegimeRouter+CircuitBreaker+ADX integrados; 9A.6 pendente arranque fisico
+[EM CURSO]  Fase 9B  SMC Layer + Cleanup      Indicator cleanup DONE; EMA migration DONE; SMC regime-aware DONE; signal_gen integration pendente
+[COMPLETA]  Fase 9C  Capital Manager V2       36 testes PASS — CapitalLayers+PositionSizer+MarginSemaphore+TPManager+DrawdownRecovery (2026-06-11)
 [PENDENTE]  Fase 9D  Dashboard V9             FastAPI + React integrados com dados V9.1
-[PENDENTE]  Fase 9E  Testes Unitarios         Cobertura V9.1: regime, SMC, capital, margem + legado
-[PENDENTE]  Fase 10  ML Filter + WFO          RandomForest quality filter + Walk-Forward Optimization
-[PENDENTE]  Fase 11  Scalping                 apos V9.1 validado
-[PENDENTE]  Fase 12  VPS Windows 24/7         operacao continua
-[PENDENTE]  Fase 13  Paper Trading            2 semanas de validacao real V9.1
-[PENDENTE]  Fase 14  Capital Real             transicao gradual com Capital Manager V2
+[EM CURSO]  Fase 9E  Testes Unitarios         222 testes PASS (2026-06-12); test_phase9e + regime_router + circuit_breaker + capital_manager
+[PENDENTE]  Fase 10  ML Filter + WFO          RandomForest quality filter + Walk-Forward Optimization (min. 200 trades)
+[PENDENTE]  Fase 11  Sentiment Avancado       SentimentEngine: surpresas economicas + sentiment por simbolo + post-event sizing
+[PENDENTE]  Fase 12  StatArb Leve             PairsTrading: zscore + ADF cointegration + capital separado (20%)
+[PENDENTE]  Fase 13  Scalping + Pyramiding    apos Fase 10 validada; scalping.yaml enabled: true
+[PENDENTE]  Fase 14  VPS Windows 24/7         operacao continua; Task Scheduler + HTTPS
+[PENDENTE]  Fase 15  Paper Trading            2 semanas com sistema completo (Fases 9-13)
+[PENDENTE]  Fase 16  Capital Real             transicao gradual com Capital Manager V2
 ```
 
 ---

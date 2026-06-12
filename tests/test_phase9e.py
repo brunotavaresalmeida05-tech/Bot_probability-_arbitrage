@@ -880,3 +880,258 @@ class TestEMARegimeVotes:
         r = regime_detect(b)
         assert r.direction == "neutral"
         assert r.state == RegimeState.RANGING
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# I. SMC REGIME-AWARE SCORE
+# ══════════════════════════════════════════════════════════════════════════════
+
+from src.analysis.smc import (
+    smc_score_with_regime_context,
+    _raw_smc_scores,
+    SMCResult as _SMCResult,
+)
+
+
+def _smc_result(
+    bullish_ob: bool = False,
+    bearish_ob: bool = False,
+    bullish_fvg: bool = False,
+    bearish_fvg: bool = False,
+    last_bos: str | None = None,
+) -> _SMCResult:
+    return _SMCResult(
+        bullish_ob_nearby=bullish_ob,
+        bearish_ob_nearby=bearish_ob,
+        bullish_fvg=bullish_fvg,
+        bearish_fvg=bearish_fvg,
+        last_bos=last_bos,
+    )
+
+
+class TestSMCRawScores:
+
+    def test_no_signals_returns_zero(self):
+        b, s = _raw_smc_scores(_smc_result())
+        assert b == 0.0
+        assert s == 0.0
+
+    def test_ob_only_bull(self):
+        b, s = _raw_smc_scores(_smc_result(bullish_ob=True))
+        assert b == pytest.approx(0.40)
+        assert s == 0.0
+
+    def test_ob_only_bear(self):
+        b, s = _raw_smc_scores(_smc_result(bearish_ob=True))
+        assert b == 0.0
+        assert s == pytest.approx(0.40)
+
+    def test_bos_only_bull(self):
+        b, s = _raw_smc_scores(_smc_result(last_bos="bullish"))
+        assert b == pytest.approx(0.35)
+        assert s == 0.0
+
+    def test_fvg_only_bull(self):
+        b, s = _raw_smc_scores(_smc_result(bullish_fvg=True))
+        assert b == pytest.approx(0.25)
+        assert s == 0.0
+
+    def test_all_bull_signals_cap_at_one(self):
+        b, s = _raw_smc_scores(_smc_result(bullish_ob=True, bullish_fvg=True, last_bos="bullish"))
+        # 0.40 + 0.35 + 0.25 = 1.0 exactly
+        assert b == pytest.approx(1.0)
+        assert s == 0.0
+
+    def test_mixed_signals_each_side_independent(self):
+        b, s = _raw_smc_scores(_smc_result(bullish_ob=True, bearish_ob=True))
+        assert b == pytest.approx(0.40)
+        assert s == pytest.approx(0.40)
+
+
+class TestSMCRegimeScore:
+
+    def test_ranging_returns_raw_scores(self):
+        smc = _smc_result(bullish_ob=True, last_bos="bullish")
+        b, s = smc_score_with_regime_context(smc, "RANGING")
+        b_raw, s_raw = _raw_smc_scores(smc)
+        assert b == pytest.approx(b_raw)
+        assert s == pytest.approx(s_raw)
+
+    def test_trending_up_boosts_bull(self):
+        smc = _smc_result(bullish_ob=True)  # bull_raw = 0.40
+        b, _ = smc_score_with_regime_context(smc, "TRENDING_UP")
+        assert b == pytest.approx(0.40 * 1.15, abs=0.001)
+
+    def test_trending_up_suppresses_bear(self):
+        smc = _smc_result(bearish_ob=True)  # bear_raw = 0.40
+        _, s = smc_score_with_regime_context(smc, "TRENDING_UP")
+        assert s == pytest.approx(0.40 * 0.60, abs=0.001)
+
+    def test_trending_down_boosts_bear(self):
+        smc = _smc_result(bearish_ob=True)  # bear_raw = 0.40
+        _, s = smc_score_with_regime_context(smc, "TRENDING_DOWN")
+        assert s == pytest.approx(0.40 * 1.15, abs=0.001)
+
+    def test_trending_down_suppresses_bull(self):
+        smc = _smc_result(bullish_ob=True)  # bull_raw = 0.40
+        b, _ = smc_score_with_regime_context(smc, "TRENDING_DOWN")
+        assert b == pytest.approx(0.40 * 0.60, abs=0.001)
+
+    def test_volatile_returns_zero_both(self):
+        smc = _smc_result(bullish_ob=True, last_bos="bullish", bullish_fvg=True)
+        b, s = smc_score_with_regime_context(smc, "VOLATILE")
+        assert b == 0.0
+        assert s == 0.0
+
+    def test_unknown_regime_returns_zero(self):
+        smc = _smc_result(bullish_ob=True)
+        b, s = smc_score_with_regime_context(smc, "UNKNOWN")
+        assert b == 0.0
+        assert s == 0.0
+
+    def test_trending_up_caps_bull_at_one(self):
+        # all bull signals → raw = 1.0; ×1.15 should cap at 1.0
+        smc = _smc_result(bullish_ob=True, bullish_fvg=True, last_bos="bullish")
+        b, _ = smc_score_with_regime_context(smc, "TRENDING_UP")
+        assert b == pytest.approx(1.0)
+
+    def test_no_signals_always_zero_regardless_of_regime(self):
+        empty = _smc_result()
+        for regime in ("RANGING", "TRENDING_UP", "TRENDING_DOWN", "VOLATILE"):
+            b, s = smc_score_with_regime_context(empty, regime)
+            assert b == 0.0 and s == 0.0, f"failed for regime={regime}"
+
+    def test_score_within_bounds(self):
+        smc = _smc_result(bullish_ob=True, bearish_ob=True, bullish_fvg=True, last_bos="bullish")
+        for regime in ("RANGING", "TRENDING_UP", "TRENDING_DOWN", "VOLATILE"):
+            b, s = smc_score_with_regime_context(smc, regime)
+            assert 0.0 <= b <= 1.0, f"bull out of bounds: {b} (regime={regime})"
+            assert 0.0 <= s <= 1.0, f"bear out of bounds: {s} (regime={regime})"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# J. SIGNAL GENERATOR — SMC CONFIRMATION PATH
+# ══════════════════════════════════════════════════════════════════════════════
+
+from src.technical.signal_generator import generate as sg_generate, SIGNAL_BUY, SIGNAL_SELL, SIGNAL_HOLD
+from src.analysis.scenario_evaluator import ScenarioResult, Scenario
+from src.technical.multi_timeframe import MTFResult
+
+
+def _minimal_bundle(symbol: str = "EURUSD", bias: str = "buy") -> IndicatorBundle:
+    """Build a minimal IndicatorBundle with sensible defaults for signal_generator tests."""
+    df = _up(200) if bias == "buy" else _down(200)
+    b = compute_bundle(symbol, "M15", df)
+    if b is None:
+        b = IndicatorBundle(symbol=symbol, timeframe="M15")
+        b.close = 1.0900
+        b.atr = 0.0010
+    return b
+
+
+def _bull_scenario() -> ScenarioResult:
+    return ScenarioResult(
+        symbol="EURUSD",
+        scenario=Scenario.BULL,
+        confidence=7,
+        lot_penalty=1.0,
+        blocked=False,
+        blocked_reason="",
+    )
+
+
+def _bear_scenario() -> ScenarioResult:
+    return ScenarioResult(
+        symbol="EURUSD",
+        scenario=Scenario.BEAR,
+        confidence=7,
+        lot_penalty=1.0,
+        blocked=False,
+        blocked_reason="",
+    )
+
+
+def _mtf(bias: str = "bullish") -> MTFResult:
+    return MTFResult(
+        symbol="EURUSD",
+        primary_tf="M15",
+        confluence_score=0.70,
+        confluence_label="moderate",
+        direction=bias,
+        higher_tf_veto=False,
+        lot_adjustment=1.0,
+    )
+
+
+def _macro(vix_regime: str = "normal", tradeable: bool = True) -> MacroContext:
+    m = MacroContext()
+    m.vix_regime = vix_regime
+    m.tradeable = tradeable
+    return m
+
+
+class TestSignalGeneratorSMCPath:
+
+    def test_smc_rationale_appears_when_smc_set(self):
+        b = _minimal_bundle("EURUSD", "buy")
+        b.smc = _smc_result(bullish_ob=True, last_bos="bullish")
+        sig = sg_generate(
+            bundle=b,
+            macro=_macro(),
+            scenario_result=_bull_scenario(),
+            mtf_result=_mtf(),
+        )
+        smc_lines = [r for r in sig.rationale if "SMC" in r]
+        assert len(smc_lines) >= 1, f"No SMC rationale. Got: {sig.rationale}"
+
+    def test_smc_none_does_not_crash(self):
+        b = _minimal_bundle("EURUSD", "buy")
+        b.smc = None
+        sig = sg_generate(
+            bundle=b,
+            macro=_macro(),
+            scenario_result=_bull_scenario(),
+            mtf_result=_mtf(),
+        )
+        assert sig.signal in (SIGNAL_BUY, SIGNAL_SELL, SIGNAL_HOLD, "BLOCKED")
+
+    def test_strong_smc_adds_two_confirms(self):
+        # All bull SMC signals → raw score 1.0 → RANGING × 1.0 = 1.0 >= 0.75 → +2 confirms
+        b = _minimal_bundle("EURUSD", "buy")
+        b.smc = _smc_result(bullish_ob=True, bullish_fvg=True, last_bos="bullish")
+        b.rsi = 55.0  # not extreme — guard won't zero out SMC
+        sig = sg_generate(
+            bundle=b,
+            macro=_macro(),
+            scenario_result=_bull_scenario(),
+            mtf_result=_mtf(),
+        )
+        # Expect at least 2 SMC confirms in rationale (score >= 0.75)
+        strong_lines = [r for r in sig.rationale if "SMC: forte" in r]
+        assert len(strong_lines) == 1, f"Expected forte confluencia. Got: {sig.rationale}"
+
+    def test_rsi_extreme_zeroes_smc_score(self):
+        b = _minimal_bundle("EURUSD", "buy")
+        b.smc = _smc_result(bullish_ob=True, last_bos="bullish")
+        b.rsi = 80.0  # extreme — SMC should be zeroed
+        sig = sg_generate(
+            bundle=b,
+            macro=_macro(),
+            scenario_result=_bull_scenario(),
+            mtf_result=_mtf(),
+        )
+        zeroed_lines = [r for r in sig.rationale if "RSI extremo" in r]
+        assert len(zeroed_lines) == 1, f"Expected RSI guard. Got: {sig.rationale}"
+
+    def test_blackout_veto_overrides_smc(self):
+        b = _minimal_bundle("EURUSD", "buy")
+        b.smc = _smc_result(bullish_ob=True, last_bos="bullish")
+        sig = sg_generate(
+            bundle=b,
+            macro=_macro(),
+            scenario_result=_bull_scenario(),
+            mtf_result=_mtf(),
+            calendar_blackout=True,
+        )
+        assert sig.signal == "BLOCKED"
+        assert "blackout" in sig.blocked_reason.lower() or "Blackout" in sig.blocked_reason

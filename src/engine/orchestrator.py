@@ -76,11 +76,13 @@ STATE_PATH   = Path("state/state.json")
 HISTORY_PATH = Path("state/state_history.jsonl")
 
 
-def _smc_to_dict(bundle) -> dict:
-    """Serialize SMCResult from an IndicatorBundle for state.json output."""
+def _smc_to_dict(bundle, regime: str = "RANGING") -> dict:
+    """Serialize SMCResult + regime-aware scores for state.json output."""
+    from src.analysis.smc import smc_score_with_regime_context
     smc = getattr(bundle, "smc", None) if bundle else None
     if smc is None:
         return {}
+    bull_score, bear_score = smc_score_with_regime_context(smc, regime)
     return {
         "bullish_ob_nearby": smc.bullish_ob_nearby,
         "bearish_ob_nearby": smc.bearish_ob_nearby,
@@ -93,6 +95,8 @@ def _smc_to_dict(bundle) -> dict:
         "fvg_count":         len(smc.fvgs),
         "unmitigated_obs":   sum(1 for ob in smc.order_blocks if not ob.mitigated),
         "unfilled_fvgs":     sum(1 for fvg in smc.fvgs if not fvg.filled),
+        "bull_score":        round(bull_score, 3),
+        "bear_score":        round(bear_score, 3),
     }
 
 
@@ -701,7 +705,10 @@ class Orchestrator:
                 "context_benchmark": sorted(self._context_syms),
             },
             "smc": {
-                sym: _smc_to_dict(self._bundles.get(sym, {}).get(PRIMARY_TF))
+                sym: _smc_to_dict(
+                    self._bundles.get(sym, {}).get(PRIMARY_TF),
+                    self._last_regime.get("state", "RANGING"),
+                )
                 for sym in self._tradable_symbols
             },
             "positions": [

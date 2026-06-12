@@ -25,7 +25,7 @@ Sistema de trading macro-driven multi-activo. Opera como "bom negociador profiss
 
 **Filosofia:** Mercado é calculado. Regime detectado (VIX + DXY + Yield Curve + Noticias) → Preço Justo calculado → Canais de volatilidade projectados → Indicadores técnicos confirmam → Risco dimensionado profissionalmente → Execução disciplinada.
 
-**Motor:** VIX + DXY + Curva de Juros + Commodities + Agenda Económica + MACD/BB/Hi-Lo/ATRStop/SAR/EMA8/VWAP/MA50/MA100/Pivot/WeisWave. Multi-timeframe: 3/5/10/15/30min e 1H. Portfolio benchmark de 30+ activos observados em permanência.
+**Motor:** VIX + DXY + Curva de Juros + Commodities + Agenda Económica + MACD/BB/ATRStop/VWAP/EMA20/EMA50/EMA100/WeisWave/SMC. Multi-timeframe: 3/5/10/15/30min e 1H. Portfolio benchmark de 30+ activos observados em permanência.
 
 **Objectivo:** Multiplicar capital de forma consistente, robusta e credível. Sistema capaz de gerir capital institucional.
 
@@ -113,17 +113,22 @@ src/
     scenario_evaluator.py ← 5 vetos sequenciais → TENDENCIA_ALTA/BAIXA/INDEFINIDO/BLOQUEADO
     asset_profiler.py     ← DNA de cada instrumento: classe, DXY beta, drivers macro, benchmark
     macro_calculator.py   ← surpresa económica (actual-consensus)/σ, regime score, yield curve, z-score, RS
-    total_score.py        ← TotalScore = wm*MCS + wb*BCS + wh*HCS + wv*VES - we*ES + wc*CS - wr*RS
-                            7 componentes: MCS(MACD) BCS(BB) HCS(Hi-Lo) VES ES CS RS(+ATRStop)
+    total_score.py        ← TotalScore = wm*MCS + wb*BCS + wv*VES - we*ES + wc*CS - wr*RS
+                            6 componentes: MCS(MACD) BCS(BB) VES ES CS RS(+ATRStop)
+                            [HCS REMOVIDO 2026-06-11 — Hi-Lo Activator eliminado do bundle]
                             Pesos por classe (forex/indices/gold/oil/treasuries/crypto) × timeframe (M3→H1)
                             Thresholds: ≥0.75 execute | 0.55-0.75 moderate | <0.40 block
   technical/
-    indicators.py         ← MACD(linhas), BB10, Hi-Lo Activator, ATR Stop (Chandelier), SAR, EMA8, VWAP, MA50/100, WeisWave, Pivot
+    indicators.py         ← MACD(linhas), BB10, ATR Stop (Chandelier), VWAP, EMA20/EMA50/EMA100, WeisWave
+                            [REMOVIDOS 2026-06-11: Hi-Lo Activator, SAR, EMA8, Pivot Points]
                             Hierarquia 4 camadas: Principal | Confirmação | Participação | Contexto
     macd_analyzer.py      ← dentes MACD: peaks/valleys clusterizados, impact_count, divergência, teeth→price levels
     bollinger_analyzer.py ← squeeze(percentil), expansão assimétrica, walking the band, BB unfulfilled points
     multi_timeframe.py    ← coordenador adaptativo: TF selecionado por BB width, veto 1H, confluência 0-1.0
-    signal_generator.py   ← pipeline completo: 7 vetos sequenciais + 8 confirmações (gate 4/8) + lot_multiplier
+                            price_vs_ema50 (era price_vs_ma50)
+    signal_generator.py   ← pipeline V9.1: TRENDING 3/8, TECNICO_PURO 5/8, Normal 4/8
+                            EMA alinhamento perfeito (20>50>100) como check 5
+                            RSI extreme guard: >=75 BUY / <=25 SELL → smc_score=0.0
   engine/
     scanner.py            ← Opportunity-Permission Engine: scan(), compute_opportunity_score(), compute_permission_score()
                             OpportunityScore = a1*MCS+a2*BCS+a3*HCS+a4*VES-a5*ES  (técnico puro)
@@ -253,11 +258,12 @@ risco:
 
 ```yaml
 adx:      period=14  strong>=25  weak<20  H1 como contexto primário
-ema:      periods=[20, 50]  uptrend=EMA20>EMA50  M15 execução
+ema:      periods=[20, 50, 100]  uptrend=EMA20>EMA50>EMA100  M15 execução  [migrado de SMA 2026-06-12]
 donchian: period=20  H1 ADX>25 obrigatório para breakout
-atr:      period=14  uso=[SL placement, lot sizing, vol filter]
+atr:      period=14  uso=[SL placement, lot sizing, vol filter, ATR Stop (Chandelier)]
 hv:       window=20  log-returns  thresholds adaptivos por percentil (p30/p70/p90)
 sessions: london=08-17UTC  new_york=13-22UTC  asia=DESLIGADA (spread)
+smc:      OB+FVG+BOS/ChoCh+Sweep  regime-aware: RANGING=full / TRENDING=±15% / VOLATILE=0.0
 ```
 
 ---
@@ -305,14 +311,14 @@ ALWAYS kill_switch global tem prioridade sobre todas as estratégias
 | 10 | Bot correndo em demo | [x] running | PID 14420, Day 2, regime indefinido (neutral+bearish), n_results=0 correcto |
 | 11 | ScalpMetrics (JSONL) | [x] done | separado do PaperValidator |
 | 12 | VIX regime fix | [x] done | `regime()` era guardado como method object |
-| 13 | Hi-Lo Activator + ATR Stop | [x] done | Camada 1: HiLoResult + ATRStopResult em IndicatorBundle |
-| 14 | HCS no TotalScore | [x] done | 7 componentes; ATR Stop proximity integrado em RS |
-| 15 | Hierarquia 4 camadas | [x] done | Principal/Confirmação/Participação/Contexto — documentada em indicators.py |
-| 16 | 8 confirmações gate | [x] done | signal_generator: Hi-Lo=3, ATR Stop=4, min 4/8 |
+| 13 | ATR Stop | [x] done | ATRStopResult em IndicatorBundle; proximity penaliza RS |
+| 14 | TotalScore 6 componentes | [x] done | HCS removido (2026-06-11); formula: MCS+BCS+VES+ES+CS+RS |
+| 15 | Hierarquia 4 camadas | [x] done | Principal/Confirmação/Participação/Contexto — indicators.py |
+| 16 | EMA Migration | [x] done | MA50/MA100 (SMA) → EMA20/EMA50/EMA100 (2026-06-12) |
 | 17 | Escalar para 0.75% | [ ] planned | Após Day 7: PF>=1.3, WR>=48%, DD<=6% |
 | 18 | Activar scalping | [ ] planned | Após Day 7 validado |
 | 19 | Pyramiding controlado | [ ] planned | Fase posterior |
-| 20 | Testes unitários Hi-Lo/ATR Stop/HCS | [ ] pendente | Dívida técnica alta |
+| 20 | test_phase9e.py (222 testes total) | [x] done | ATRStop, TotalScore, OpportunityScore, SMC, EMA (2026-06-12) |
 | 21 | Opportunity-Permission Engine | [x] done | src/engine/scanner.py — 2 fases separadas; spec em .ai/specs/opportunity-permission-engine.md |
 | 22 | RSI(14) no scanner | [x] done | rsi=50.0 neutro (sem efeito). Momentum +0.02, extremo mod -0.03/RS+0.07, extremo forte -0.06/RS+0.15. checks/rsi_report.py |
 | 23 | RSI Calibration Policy | [x] done | Peso dinâmico por classe×TF×vol_regime. config/rsi_calibration.yaml. Avaliação automática em checks/rsi_report.py --calibrate |
@@ -321,12 +327,18 @@ ALWAYS kill_switch global tem prioridade sobre todas as estratégias
 | 26 | Confluência 3/5 (TRENDING mode) | [x] done | signal_generator: TRENDING→3/8 confirms+lot_context; TECNICO_PURO→5/8; Normal→4/8 |
 | 33 | Circuit Breaker 4 níveis | [x] done | src/engine/circuit_breaker.py — GREEN/YELLOW(lot×0.5)/ORANGE/RED; DD e streak triggers; integrado orchestrator |
 | 34 | ADX(14) no IndicatorBundle | [x] done | indicators.py: adx_indicator() Wilder EWM; default=20.0; usado pelo regime_router |
-| 27 | SMC Layer | [ ] planned | src/analysis/smc.py — Order Blocks, FVG, BOS/ChoCh, Liquidity Sweeps |
-| 28 | Capital Manager V2 | [ ] planned | src/risk/capital_manager.py — 3 camadas (70/20/10) + Kelly/4 sizing + rebalanceamento mensal |
-| 29 | Margin Manager | [ ] planned | src/risk/margin_manager.py — semáforo 5 níveis (>500% verde → <150% crítico) |
-| 30 | TP Escalonado 40/35/25% | [ ] planned | Upgrade order_manager.py — TP1 40%+BE, TP2 35%+trailing ATR×1.0, TP3 25% runner |
-| 31 | Circuit Breaker 4 Níveis | [ ] planned | src/engine/circuit_breaker.py — ALERTA/REDUÇÃO/PAUSA/PARAGEM TOTAL |
-| 32 | ML Filter | [ ] planned | src/analysis/ml_filter.py — RandomForest quality classifier. Fase 10 (após 200+ trades V9.1) |
+| 35 | Capital Manager V2 | [x] done | src/engine/capital_manager.py — CapitalLayers(70/20/10) + PositionSizer(regime×DD×WR) + MarginSemaphore(5 níveis) + TPManager(40/35/25%) + DrawdownRecovery(5 fases); 36 testes PASS; integrado orchestrator |
+| 36 | Indicator Cleanup 9B.0 | [x] done | Hi-Lo, SAR, Pivot, EMA8 removidos do IndicatorBundle (2026-06-11) |
+| 37 | SMC Regime-Aware Score | [x] done | smc.py: _raw_smc_scores() + smc_score_with_regime_context() — RANGING/TRENDING/VOLATILE (2026-06-11) |
+| 38 | SMC integracao signal_generator | [ ] pendente | confluencia +1 no sistema 3/5 |
+| 27 | SMC Layer integration | [ ] pendente | signal_generator: smc_score_with_regime_context como +1 na confluencia 3/5 |
+| 28 | Capital Manager V2 | [x] done | src/engine/capital_manager.py — 3 camadas (70/20/10) + Kelly/4 sizing + MarginSemaphore |
+| 29 | Margin Manager | [x] done | Integrado no capital_manager.py — semaforo 5 niveis (GREEN>=500% → CRITICAL<150%) |
+| 30 | TP Escalonado 40/35/25% | [x] done | Integrado no capital_manager.py TPManager — TP1 40%+BE, TP2 35%+trailing, TP3 25% runner |
+| 31 | Circuit Breaker 4 Niveis | [x] done | src/engine/circuit_breaker.py — GREEN/YELLOW/ORANGE/RED; integrado orchestrator |
+| 32 | ML Filter | [ ] planned | src/analysis/ml_filter.py — RandomForest quality classifier. Fase 10 (apos 200+ trades V9.1) |
+| 39 | Sentiment Avancado | [ ] planned | Fase 11: SentimentEngine (src/macro/sentiment_engine.py) + EconomicSurprise — surpresa por simbolo no CS |
+| 40 | StatArb Leve (Pairs Trading) | [ ] planned | Fase 12: PairsTrading (pairs_detector.py) + ADF cointegration — TYPE_PAIRS paralelo; pool 20% capital |
 
 ---
 
@@ -387,17 +399,17 @@ ALWAYS usar python -m src.main (NUNCA python src/main.py).
 NEVER mexer em estratégias desligadas sem instruções explícitas.
 ALWAYS declarar qual skill está a usar e porquê.
 
-Estado operacional actual (2026-06-10):
+Estado operacional actual (2026-06-12):
+  Branch: refactor/motor-principal
   Bot: PARADO — ultimo ciclo: cycle=199 (2026-06-09T19:19Z, NY session)
-  Fase 8: COMPLETA — veredicto: AVANCAR para V9.1 (signals=0 estrutural confirmado)
-  Fase 9A: EM CURSO — Tasks 9A.1-9A.5 concluidas; pendente: 9A.6 (day0_reset nova janela)
-  Implementados: regime_router.py + circuit_breaker.py + ADX no IndicatorBundle
-  signal_generator.py: VETO 5 reescrito — TRENDING (ADX>=25) bypassa macro=neutral
-  state.json: inclui agora "regime" + "circuit_breaker" + "scenario" por sinal
-  Testes: 43 PASS (test_regime_router.py + test_circuit_breaker.py)
-  Bug corrigido: CircuitBreaker._date="" causava daily_start_equity override na 1a update()
-  Proximo passo: day0_reset.py + arrancar bot V9.1 + validar signals>0 em regime TRENDING
-  Divida critica restante: SMC Layer (9B), Capital Manager V2 (9C), Dashboard V9 (9D)
+  Fase 8: COMPLETA — veredicto: AVANCAR para V9.1
+  Fase 9A: COMPLETA — RegimeRouter + CircuitBreaker + ADX integrados; pendente: 9A.6 arranque fisico
+  Fase 9B: COMPLETA (2026-06-12) — cleanup+EMA+SMC regime-aware+testes+state.json; 220 testes PASS
+  Fase 9C: COMPLETA — Capital Manager V2 (36 testes PASS, 79 total)
+  Fase 9E: EM CURSO — 222 testes PASS (test_phase9e + regime_router + circuit_breaker + capital_manager)
+  IndicatorBundle ACTUAL: ema20/ema50/ema100 (migrado de ma50/ma100); hi_lo/sar/pivot REMOVIDOS
+  TotalScore ACTUAL: 6 componentes (MCS+BCS+VES+ES+CS+RS); HCS REMOVIDO
+  Proximo passo critico: day0_reset.py + arrancar bot V9.1 + nova janela validacao 7 dias
   server/: FastAPI + WebSockets (uvicorn server.main:app) — serve dashboard/ como static
   app/: modulo legado de comparacao de backtest (nao e o engine live)
   ROADMAP.md: ficheiro vivo de planificacao — actualizar sempre que nova integracao discutida
