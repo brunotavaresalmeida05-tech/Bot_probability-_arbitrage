@@ -137,9 +137,12 @@ class OrderManager:
             price - sl_distance if direction == "buy" else price + sl_distance,
             5,
         )
+        # TP must also respect minimum stop distance; enforce RRR >= 1.5 on fallback
+        effective_tp_dist = max(tp_distance or 0.0, sl_distance * 1.5)
+        effective_tp_dist = self._enforce_min_stop(symbol, effective_tp_dist)
         fallback_tp = round(
-            price + (tp_distance or sl_distance * 2.0) if direction == "buy"
-            else price - (tp_distance or sl_distance * 2.0),
+            price + effective_tp_dist if direction == "buy"
+            else price - effective_tp_dist,
             5,
         )
 
