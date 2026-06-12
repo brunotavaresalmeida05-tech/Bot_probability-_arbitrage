@@ -168,8 +168,9 @@ class OrderManager:
                     comment=comment,
                     ts=ts,
                 )
-                if result is not None:
+                if result is not None and result.success:
                     return result
+                # structured failed (e.g. tp1 too close) → fall through to single order
 
         # ── Fallback: single order, TP1 level if available ─────────────────
         if self._cm is not None and atr > 0:
@@ -368,6 +369,18 @@ class OrderManager:
                 "type_filling": mt5lib.ORDER_FILLING_IOC,
             }
             result = mt5lib.order_send(request)
+            # Auto-retry once if stops are invalid: double the SL/TP distances
+            if result and result.retcode == 10016:
+                sl_d = abs(price - request["sl"]) * 2.0
+                request["sl"] = round(price - sl_d if direction == "buy" else price + sl_d, 5)
+                if request["tp"]:
+                    tp_d = abs(price - request["tp"]) * 2.0
+                    request["tp"] = round(price + tp_d if direction == "buy" else price - tp_d, 5)
+                logger.debug(f"[RETRY 10016] {symbol}: sl={request['sl']} tp={request['tp']}")
+                result = mt5lib.order_send(request)
+                sl = request["sl"]
+                tp = request["tp"] or tp
+
             if result and result.retcode == mt5lib.TRADE_RETCODE_DONE:
                 if register:
                     self._risk.register_open(symbol, direction, lots, price, sl)
