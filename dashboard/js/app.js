@@ -4,25 +4,18 @@ var V9 = {
     token: localStorage.getItem('v9_token') || '',
     ws: null,
     pollTimer: null,
-    data: {}
+    posTimer: null,
+    data: {},
+    livePositions: null
 };
 
 /* ── INIT ── */
 document.addEventListener('DOMContentLoaded', function () {
     startClock();
-    if (V9.token) {
-        showDashboard();
-        fetchAndRender();
-        startPolling();
-        connectWS();
-    } else {
-        showLogin();
-    }
-
-    document.getElementById('login-btn').addEventListener('click', doLogin);
-    document.getElementById('login-pass').addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') doLogin();
-    });
+    showDashboard();
+    fetchAndRender();
+    startPolling();
+    connectWS();
 });
 
 /* ── CLOCK ── */
@@ -77,12 +70,7 @@ function doLogin() {
 
 /* ── FETCH ── */
 function apiFetch(path) {
-    return fetch(path, {
-        headers: { 'Authorization': 'Bearer ' + V9.token }
-    }).then(function (r) {
-        if (r.status === 401) { V9.token = ''; localStorage.removeItem('v9_token'); showLogin(); }
-        return r.json();
-    });
+    return fetch(path).then(function (r) { return r.json(); });
 }
 
 function fetchAndRender() {
@@ -94,6 +82,18 @@ function fetchAndRender() {
 function startPolling() {
     if (V9.pollTimer) clearInterval(V9.pollTimer);
     V9.pollTimer = setInterval(fetchAndRender, 5000);
+    if (V9.posTimer) clearInterval(V9.posTimer);
+    V9.posTimer = setInterval(fetchLivePositions, 4000);
+    fetchLivePositions();
+}
+
+function fetchLivePositions() {
+    apiFetch('/api/v9/positions').then(function (list) {
+        if (Array.isArray(list)) {
+            V9.livePositions = list;
+            if (V9.data && V9.data.ts) renderPositions(V9.data);
+        }
+    }).catch(function () {});
 }
 
 /* ── WEBSOCKET ── */
@@ -134,6 +134,11 @@ function render(d) {
     renderSignals(d);
     renderScore(d);
     renderScanner(d);
+    renderCircuitBreaker(d);
+    renderCapital(d);
+    renderPositions(d);
+    renderSMC(d);
+    renderFamilies(d);
     renderPrep(d);
 }
 
@@ -152,7 +157,8 @@ function renderTopbar(d) {
     setEl('kpi-balance',   acc.balance   != null ? fmt2(acc.balance)   + ' ' + (acc.currency || '') : '--');
     setEl('kpi-equity',    acc.equity    != null ? fmt2(acc.equity)    + ' ' + (acc.currency || '') : '--');
     setEl('kpi-pnl',       acc.profit    != null ? fmt2(acc.profit)    + ' ' + (acc.currency || '') : '--');
-    setEl('kpi-positions', (d.risk || {}).open_positions || 0);
+    var posCount = V9.livePositions !== null ? V9.livePositions.length : ((d.risk || {}).open_positions || 0);
+    setEl('kpi-positions', posCount);
 }
 
 /* REGIME */
@@ -534,6 +540,195 @@ function skpi(label, val, cls) {
         '<span class="scanner-kpi-label">' + label + '</span>' +
         '<span class="scanner-kpi-value ' + (cls||'') + '">' + val + '</span>' +
     '</div>';
+}
+
+/* CIRCUIT BREAKER */
+function renderCircuitBreaker(d) {
+    var cb = d.circuit_breaker || {};
+    var level = (cb.level || 'GREEN').replace('CBLevel.', '').toUpperCase();
+
+    var badge = document.getElementById('cb-level');
+    if (badge) {
+        badge.textContent = level;
+        badge.className   = 'cb-level-badge ' + level;
+    }
+
+    var dd  = cb.daily_drawdown   != null ? (cb.daily_drawdown  * 100).toFixed(2) + '%' : '--';
+    var los = cb.consecutive_losses != null ? cb.consecutive_losses : '--';
+    var can = cb.can_open != null ? (cb.can_open ? '[SIM]' : '[BLOQUEADO]') : '--';
+    var lm  = cb.lot_multiplier   != null ? 'x' + cb.lot_multiplier.toFixed(2) : '--';
+
+    var items = [
+        { label: 'Drawdown diario',   val: dd,  cls: parseFloat(dd) > 5 ? 'danger' : '' },
+        { label: 'Perdas consecutivas', val: String(los), cls: los > 3 ? 'danger' : los > 1 ? 'warn' : '' },
+        { label: 'Pode abrir',        val: can, cls: cb.can_open ? 'ok' : 'danger' },
+        { label: 'Lot multiplier',    val: lm,  cls: (cb.lot_multiplier || 1) < 1 ? 'warn' : 'ok' },
+    ];
+
+    var html = items.map(function (it) {
+        return '<div class="cb-item">' +
+            '<span class="cb-item-label">' + it.label + '</span>' +
+            '<span class="cb-item-value ' + (it.cls||'') + '">' + it.val + '</span>' +
+        '</div>';
+    }).join('');
+    setHtml('cb-grid', html);
+}
+
+/* CAPITAL MANAGER */
+function renderCapital(d) {
+    var cm  = d.capital_manager || {};
+    var acc = d.account || {};
+    var panel = document.getElementById('capital-panel');
+    if (!panel) return;
+
+    // cm keys from get_metrics(): total_capital, layers.{total,active,margin_reserve,emergency},
+    // drawdown_current (0-1), risk_multiplier, margin_level_status, margin_level_pct,
+    // margin_free, open_trades_count, monthly_pnl_pct, winrate_30d, profit_factor_30d
+    var layers  = cm.layers || {};
+    var dd      = cm.drawdown_current;
+    var ddPct   = dd != null ? (dd * 100).toFixed(2) + '%' : '--';
+    var ddCls   = dd == null ? '' : dd > 0.08 ? 'danger' : dd > 0.04 ? 'warn' : 'ok';
+    var mls     = cm.margin_level_status || '';
+    var mlsCls  = mls === 'GREEN' ? 'ok' : mls === 'YELLOW' ? 'warn' : mls ? 'danger' : '';
+    var ml      = acc.margin_level;
+    var mlTxt   = ml != null ? (ml > 9990 ? '>9999' : ml.toFixed(0)) + '%' : (cm.margin_level_pct != null ? cm.margin_level_pct.toFixed(0) + '%' : '--');
+    var mlCls   = ml == null ? mlsCls : ml >= 500 ? 'ok' : ml >= 300 ? 'warn' : 'danger';
+    var mPct    = cm.monthly_pnl_pct;
+    var mPctTxt = mPct != null ? (mPct >= 0 ? '+' : '') + (mPct * 100).toFixed(2) + '%' : '--';
+    var mPctCls = mPct == null ? '' : mPct >= 0 ? 'ok' : 'danger';
+
+    var rows = [
+        { label: 'Capital (base)',   val: cm.total_capital != null ? fmt2(cm.total_capital) + ' ' + (acc.currency||'EUR') : '--' },
+        { label: 'Capital activo',   val: layers.active != null ? fmt2(layers.active) + ' ' + (acc.currency||'EUR') : '--' },
+        { label: 'Reserva margem',   val: layers.margin_reserve != null ? fmt2(layers.margin_reserve) + ' ' + (acc.currency||'EUR') : '--' },
+        { label: 'Margem livre',     val: acc.margin_free != null ? fmt2(acc.margin_free) + ' ' + (acc.currency||'EUR') : (cm.margin_free != null ? fmt2(cm.margin_free) : '--') },
+        { label: 'Nivel de margem',  val: mlTxt, cls: mlCls },
+        { label: 'Drawdown actual',  val: ddPct, cls: ddCls },
+        { label: 'PnL mensal',       val: mPctTxt, cls: mPctCls },
+        { label: 'Risk multiplier',  val: cm.risk_multiplier != null ? 'x' + cm.risk_multiplier.toFixed(2) : '--',
+          cls: (cm.risk_multiplier||1) < 1 ? 'warn' : 'ok' },
+        { label: 'Win rate 30d',     val: cm.winrate_30d != null ? (cm.winrate_30d * 100).toFixed(0) + '%' : '--',
+          cls: (cm.winrate_30d||0.5) >= 0.55 ? 'ok' : (cm.winrate_30d||0.5) < 0.4 ? 'danger' : '' },
+        { label: 'Posicoes abertas', val: cm.open_trades_count != null ? String(cm.open_trades_count) : '--' },
+    ];
+
+    panel.innerHTML = rows.map(function (r) {
+        return '<div class="cap-row">' +
+            '<span class="cap-label">' + r.label + '</span>' +
+            '<span class="cap-value ' + (r.cls||'') + '">' + r.val + '</span>' +
+        '</div>';
+    }).join('');
+}
+
+/* POSITIONS */
+function renderPositions(d) {
+    var positions = V9.livePositions !== null ? V9.livePositions : (d.positions || []);
+    var countEl = document.getElementById('pos-count');
+    if (countEl) countEl.textContent = '[' + positions.length + ']';
+
+    var feed = document.getElementById('positions-feed');
+    if (!feed) return;
+
+    if (!positions.length) {
+        feed.innerHTML = '<p class="empty-state">Sem posicoes abertas.</p>';
+        return;
+    }
+
+    feed.innerHTML = positions.map(function (p) {
+        var dir     = (p.direction || p.type || 'buy').toLowerCase();
+        var sym     = p.sym || p.symbol || '';
+        var lots    = p.lots != null ? p.lots.toFixed(2) : '--';
+        var entry   = p.entry != null ? p.entry.toFixed(5) : '--';
+        var sl      = p.sl    != null && p.sl !== 0 ? 'SL ' + p.sl.toFixed(5) : 'SL --';
+        var tp      = p.tp    != null && p.tp !== 0 ? 'TP ' + p.tp.toFixed(5) : 'TP --';
+        var profit  = p.profit != null ? p.profit : null;
+        var pnlCls  = profit == null ? '' : profit >= 0 ? 'positive' : 'negative';
+        var pnlTxt  = profit != null ? (profit >= 0 ? '+' : '') + fmt2(profit) : '--';
+        var isRunner = p.is_runner || (p.comment || '').endsWith(':run');
+        var tag     = isRunner ? '[RUNNER]' : (p.comment || '').endsWith(':tp2') ? '[TP2]' : '';
+
+        return '<div class="pos-card ' + dir + (isRunner ? ' runner' : '') + '">' +
+            '<span class="pos-sym">' + sym + '</span>' +
+            '<span class="pos-dir ' + dir + '">[' + dir.toUpperCase() + ']</span>' +
+            '<span class="pos-lots">' + lots + ' lts</span>' +
+            '<span class="pos-entry">@ ' + entry + '</span>' +
+            '<span class="pos-sl">' + sl + '</span>' +
+            '<span class="pos-tp">' + tp + '</span>' +
+            '<span class="pos-pnl ' + pnlCls + '">' + pnlTxt + '</span>' +
+            (tag ? '<span class="pos-tag">' + tag + '</span>' : '') +
+        '</div>';
+    }).join('');
+}
+
+/* SMC MATRIX */
+function renderSMC(d) {
+    var smc = d.smc || {};
+    var container = document.getElementById('smc-matrix');
+    if (!container) return;
+
+    var syms = Object.keys(smc);
+    if (!syms.length) {
+        container.innerHTML = '<p class="empty-state">Sem dados SMC disponíveis.</p>';
+        return;
+    }
+
+    container.innerHTML = syms.map(function (sym) {
+        var s = smc[sym];
+        if (!s || !Object.keys(s).length) return '';
+
+        function smcBool(v) {
+            return v ? '<span class="smc-val on">[SIM]</span>' : '<span class="smc-val off">[NAO]</span>';
+        }
+        function smcDir(v) {
+            if (!v) return '<span class="smc-val off">--</span>';
+            var cls = v === 'bullish' ? 'bull' : 'bear';
+            return '<span class="smc-val ' + cls + '">' + v.toUpperCase() + '</span>';
+        }
+
+        return '<div class="smc-sym-card">' +
+            '<div class="smc-sym-name">' + sym + '</div>' +
+            '<div class="smc-row"><span class="smc-key">Bull OB</span>'  + smcBool(s.bullish_ob_nearby) + '</div>' +
+            '<div class="smc-row"><span class="smc-key">Bear OB</span>'  + smcBool(s.bearish_ob_nearby) + '</div>' +
+            '<div class="smc-row"><span class="smc-key">Bull FVG</span>' + smcBool(s.bullish_fvg)       + '</div>' +
+            '<div class="smc-row"><span class="smc-key">Bear FVG</span>' + smcBool(s.bearish_fvg)       + '</div>' +
+            '<div class="smc-row"><span class="smc-key">BOS</span>'      + smcDir(s.last_bos)           + '</div>' +
+            '<div class="smc-row"><span class="smc-key">ChoCh</span>'    + smcDir(s.last_choch)         + '</div>' +
+            '<div class="smc-row"><span class="smc-key">OBs</span><span class="smc-val">' + (s.ob_count||0) + ' (' + (s.unmitigated_obs||0) + ' unmit)</span></div>' +
+            '<div class="smc-row"><span class="smc-key">FVGs</span><span class="smc-val">' + (s.fvg_count||0) + ' (' + (s.unfilled_fvgs||0) + ' open)</span></div>' +
+        '</div>';
+    }).join('');
+}
+
+/* MARKET FAMILIES */
+function renderFamilies(d) {
+    var fam = d.family_analyses || {};
+    var panel = document.getElementById('families-panel');
+    if (!panel) return;
+
+    var syms = Object.keys(fam);
+    if (!syms.length) {
+        panel.innerHTML = '<p class="empty-state">Sem familias analisadas neste ciclo.</p>';
+        return;
+    }
+
+    panel.innerHTML = syms.map(function (sym) {
+        var f = fam[sym];
+        var alignCls  = f.direction_aligned ? 'ok' : 'warn';
+        var alignTxt  = f.direction_aligned ? '[ALINHADO]' : '[DIVERGENTE]';
+        var spreadCls = f.spread_normal     ? 'ok' : 'warn';
+        var spreadTxt = f.spread_normal     ? '[NORMAL]'   : '[LARGO]';
+        var delta     = f.confluence_delta || 0;
+        var deltaCls  = delta > 0 ? 'positive' : delta < 0 ? 'negative' : 'neutral';
+        var deltaTxt  = (delta >= 0 ? '+' : '') + delta.toFixed(3);
+
+        return '<div class="fam-row">' +
+            '<span class="fam-sym">' + sym + '</span>' +
+            '<span class="fam-name">' + (f.family||'') + (f.futures ? ' / ' + f.futures : '') + '</span>' +
+            '<span class="fam-align '  + alignCls  + '">' + alignTxt  + '</span>' +
+            '<span class="fam-spread ' + spreadCls + '">' + spreadTxt + '</span>' +
+            '<span class="fam-delta '  + deltaCls  + '">delta ' + deltaTxt + '</span>' +
+        '</div>';
+    }).join('');
 }
 
 /* ── UTILS ── */

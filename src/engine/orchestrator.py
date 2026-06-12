@@ -175,6 +175,7 @@ class Orchestrator:
         # OrderManager wired after cm is ready so it can use structured TP
         self._orders = OrderManager(mt5, self._risk, dry_run=dry_run, cm=self._cm)
         self._last_regime: dict = {"state": "UNKNOWN", "direction": "neutral", "adx": 20.0, "lot_context": 1.0}
+        self._last_account: dict = {}
         # Trailing manager shares the bundles reference (read-only from its thread)
         self._trailing = TrailingManager(self._bundles, dry_run=dry_run)
 
@@ -213,6 +214,15 @@ class Orchestrator:
             self._risk.update_account(balance, equity)
             self._cb.set_session_equity(equity)
             self._cm.update_account(balance, equity, margin_level_pct, margin_free)
+            self._last_account = {
+                "balance":      round(balance, 2),
+                "equity":       round(equity, 2),
+                "profit":       round(equity - balance, 2),
+                "margin_level": round(margin_level_pct, 2),
+                "margin_free":  round(margin_free, 2),
+                "currency":     str(getattr(info, "currency", "EUR")),
+                "leverage":     int(getattr(info, "leverage", 1)),
+            }
         except Exception:
             pass
 
@@ -645,6 +655,37 @@ class Orchestrator:
             pass
         return 0.0
 
+    def _live_positions(self) -> list[dict]:
+        """Lê posições abertas directamente do MT5; fallback para risk manager."""
+        try:
+            import MetaTrader5 as mt5lib
+            raw = mt5lib.positions_get()
+            if raw is not None:
+                result = []
+                for p in raw:
+                    result.append({
+                        "ticket":    int(p.ticket),
+                        "symbol":    str(p.symbol),
+                        "direction": "buy" if p.type == mt5lib.POSITION_TYPE_BUY else "sell",
+                        "lots":      float(p.volume),
+                        "entry":     float(p.price_open),
+                        "current":   float(p.price_current),
+                        "sl":        float(p.sl),
+                        "tp":        float(p.tp),
+                        "profit":    round(float(p.profit), 2),
+                        "swap":      round(float(p.swap), 2),
+                        "comment":   str(p.comment),
+                        "magic":     int(p.magic),
+                        "is_runner": str(p.comment).endswith(":run"),
+                    })
+                return result
+        except Exception:
+            pass
+        return [
+            dict(sym=sym, **info)
+            for sym, info in self._risk.state.open_positions.items()
+        ]
+
     def _build_state(self, ts: str, session, signals: list, family_analyses: dict | None = None) -> dict:
         bench = self._benchmark.snapshot.to_summary() if self._benchmark else {}
         return {
@@ -727,10 +768,8 @@ class Orchestrator:
                 )
                 for sym in self._tradable_symbols
             },
-            "positions": [
-                dict(sym=sym, **info)
-                for sym, info in self._risk.state.open_positions.items()
-            ],
+            "positions": self._live_positions(),
+            "account": self._last_account,
             "last_prep": self._last_prep,
             "dry_run": self._dry_run,
             "n_results": len(signals),
