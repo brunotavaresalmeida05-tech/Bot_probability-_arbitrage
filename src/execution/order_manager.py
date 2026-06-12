@@ -91,15 +91,22 @@ class OrderManager:
         atr: float = 0.0,
         nearest_res: float | None = None,
         second_res: float | None = None,
+        lot_multiplier: float = 1.0,
     ) -> OrderResult:
         """
         Open a position with structured 3-level TP when possible.
 
-        atr          — ATR of the primary timeframe (M5); drives TP1/TP2 if no resistance levels
+        atr          — ATR of the primary timeframe; drives TP1/TP2 if no resistance levels
         nearest_res  — MACD nearest resistance (buy) or support (sell); used as TP1 target
         second_res   — second resistance/support; used as TP2 target
+        lot_multiplier — signal quality multiplier [0,1]; 0 = skip execution
         """
         ts = datetime.now(timezone.utc).isoformat()
+
+        if lot_multiplier <= 0.0:
+            return OrderResult(False, symbol, direction, 0, 0, 0, 0,
+                               reason=f"lot_multiplier={lot_multiplier:.3f} — signal blocked",
+                               timestamp=ts)
 
         allowed, reason = self._risk.can_open(symbol, direction)
         if not allowed:
@@ -111,11 +118,19 @@ class OrderManager:
             return OrderResult(False, symbol, direction, 0, 0, 0, 0,
                                reason=sizing.reason, timestamp=ts)
 
+        # Apply signal quality multiplier to lot size
+        if lot_multiplier < 1.0:
+            min_lot = getattr(self._risk, "_min_lot", 0.01)
+            sizing.lots = round(max(min_lot, sizing.lots * lot_multiplier), 4)
+
         # Live price
         price = self._get_price(symbol, direction)
         if price is None:
             return OrderResult(False, symbol, direction, 0, 0, 0, 0,
                                reason="No tick from MT5", timestamp=ts)
+
+        # Enforce MT5 minimum stop distance (prevents retcode=10016)
+        sl_distance = self._enforce_min_stop(symbol, sl_distance)
 
         sl = round(
             price - sl_distance if direction == "buy" else price + sl_distance,
@@ -355,6 +370,25 @@ class OrderManager:
             logger.exception(f"Order send error {symbol}: {e}")
             return OrderResult(False, symbol, direction, 0, 0, 0, 0,
                                reason=str(e), timestamp=ts)
+
+    def _enforce_min_stop(self, symbol: str, sl_distance: float) -> float:
+        """Expand sl_distance to meet MT5's minimum stop distance (prevents retcode=10016)."""
+        if self._dry_run:
+            return sl_distance
+        try:
+            import MetaTrader5 as mt5lib
+            info = mt5lib.symbol_info(symbol)
+            if info and info.trade_stops_level > 0 and info.point > 0:
+                min_dist = (info.trade_stops_level + 5) * info.point
+                if sl_distance < min_dist:
+                    logger.debug(
+                        f"[MINSTOP] {symbol}: sl_dist {sl_distance:.6f} → {min_dist:.6f} "
+                        f"(broker_min={info.trade_stops_level}pts)"
+                    )
+                    return min_dist
+        except Exception:
+            pass
+        return sl_distance
 
     def _get_price(self, symbol: str, direction: str) -> float | None:
         try:

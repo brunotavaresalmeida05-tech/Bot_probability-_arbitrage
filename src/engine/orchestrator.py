@@ -452,6 +452,7 @@ class Orchestrator:
                     atr=_atr,
                     nearest_res=_near,
                     second_res=_far,
+                    lot_multiplier=sig.lot_multiplier,
                 )
             elif can_open and not cm_ok:
                 logger.info(f"[CM] {sig.symbol} blocked by CapitalManager: {cm_reason}")
