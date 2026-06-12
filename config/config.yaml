@@ -1,40 +1,183 @@
 app:
-  name: TradingBot
+  name: AlphaSystem_V9
   profile: live_demo
+
+# ── Modo de execução ──────────────────────────────────────────────────────────
 mode:
-  dry_run: true
-  kill_switch: true
+  dry_run: false          # false = envia ordens reais ao MT5 (demo account)
+  kill_switch: false      # kill_switch global tem prioridade sobre tudo
+
+# ── Conta e capital base ──────────────────────────────────────────────────────
+account:
+  use_equity_as_base: true          # usar min(equity, balance) como capital base
+  capital_base_percent: 0.70        # 70% do capital base para trading
+  reserve_margin_percent: 0.20      # 20% reserva de margem (nunca em trades)
+  reserve_emergency_percent: 0.10   # 10% emergência (activo só em DD >= 12%)
+  emergency_release_drawdown: 0.12  # nível de DD que liberta reserva de emergência
+
+# ── Risco ─────────────────────────────────────────────────────────────────────
 risk:
+  base_risk_per_trade: 0.01         # 1% risco base por trade
+  max_risk_per_trade: 0.02          # cap absoluto: 2%
+  max_daily_loss: 0.03              # 3% perda diária máxima
+  max_weekly_loss: 0.08             # 8% perda semanal máxima
+  max_drawdown: 0.15                # 15% → HALTED (CapitalManagerV2)
   max_spread: 0.0015
-  max_daily_loss: 0.03    # alinhado com strategies.yaml daily_loss_limit_pct e kill_switch (era 0.02)
-  max_positions: 5        # alinhado com strategies.yaml max_positions_total (era 3)
+  max_positions: 5
+  # Multiplicadores de drawdown
+  risk_reduction_dd_05: 0.75        # DD > 5%  → risco × 0.75
+  risk_reduction_dd_08: 0.50        # DD > 8%  → risco × 0.50
+  risk_reduction_dd_12: 0.25        # DD > 12% → risco × 0.25
+  # Multiplicadores de performance
+  performance_boost_winrate: 0.10   # WR > 65% → +10% risco
+  performance_cut_winrate_low: 0.75 # WR < 40% → −25% risco
+  # Legado (usado pelo engine antigo)
   default_qty: 0.01
   min_cash: 100.0
   sl_atr_mult: 1.5
   tp_atr_mult: 1.5
+
+# ── Position sizing ───────────────────────────────────────────────────────────
+sizing:
+  use_dynamic_sizing: true
+  round_lots_down: true             # NUNCA arredondar lotes para cima
+  min_lot_floor: 0.01               # usar min_lot se cálculo der abaixo (não bloquear)
+  kelly_fraction: 0.25              # Kelly fracionado para scaling conservador
+
+# ── Margem ────────────────────────────────────────────────────────────────────
+margin:
+  green_level: 400                  # >= 400% → GREEN  (livre para abrir)
+  yellow_level: 300                 # >= 300% → YELLOW (bloqueia novas entradas)
+  orange_level: 200                 # >= 200% → ORANGE (fecha pior posição)
+  red_level: 150                    # >= 150% → RED    (fecha 50%)
+  critical_level: 120               # <  120% → CRITICAL (fecha tudo)
+
+# ── Gestão de posições abertas ────────────────────────────────────────────────
+trade_management:
+  tp1_percent: 0.40                 # 40% do lote fecha em TP1
+  tp2_percent: 0.35                 # 35% fecha em TP2
+  runner_percent: 0.25              # 25% corre com trailing
+  rrr_minimum: 1.5
+  tp1_atr_mult: 1.5
+  tp2_atr_mult: 2.5
+  trailing_after_tp1: true
+  move_sl_to_breakeven_after_tp1: true
+
+# ── Execução ──────────────────────────────────────────────────────────────────
+execution:
+  max_slippage_points: 20
+  allow_market_orders: true
+  order_comment: "AlphaV9"
+  magic_number: 20260902
+  max_open_trades: 6
+
+# ── Mercado ───────────────────────────────────────────────────────────────────
 market:
-  mt5_timeframe: M15      # engine usa strategies.yaml TFs; este campo é para o BotApp legacy loop
+  mt5_timeframe: M15
   market_bars: 200
-  symbols:                # lista completa dos símbolos usados pelas estratégias
-  - EURUSD
-  - GBPUSD
-  - USDJPY
-  - Usa500
-  - UsaTec
-  - Ger40
-  - GOLD
-  - Brent
-  - LCrude
+
+  # Geram sinal e abrem posicoes reais
+  tradable:
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+    - AUDUSD
+    - USDCAD
+    - Usa500
+    - UsaTec
+    - Ger40
+    - UK100
+    - GOLD
+    - SILVER
+    - Brent
+    - LCrude
+    - NGas
+    - BTCUSD
+    - Coffee
+
+  # Futuros da mesma familia — indicadores calculados, nao geram trade
+  # Usados para confirmar direcao e spread face ao spot
+  futures_mirror:
+    - Usa500Jun26
+    - UsaTecJun26
+    - UK100Jun26
+    - Ger40Jun26
+
+  # Benchmarks de contexto — leitura macro/regime, nao geram trade
+  context_benchmark:
+    - USDCHF
+    - USDNOK
+    - NZDUSD
+
+  # Lista plana para retrocompatibilidade (gerada automaticamente no arranque)
+  symbols:
+    - EURUSD
+    - GBPUSD
+    - USDJPY
+    - AUDUSD
+    - USDCAD
+    - Usa500
+    - UsaTec
+    - Ger40
+    - UK100
+    - GOLD
+    - SILVER
+    - Brent
+    - LCrude
+    - NGas
+    - BTCUSD
+    - Coffee
+
+# ── Regime ────────────────────────────────────────────────────────────────────
+regime:
+  enabled: true
+  states:
+    - TRENDING_UP
+    - TRENDING_DOWN
+    - RANGING
+    - VOLATILE
+  volatile_action: reduce_or_pause
+
+# ── Sessões ───────────────────────────────────────────────────────────────────
+session:
+  london_enabled: true
+  new_york_enabled: true
+  overlap_enabled: true
+  asia_enabled: false
+  off_hours_reduce_risk: true
+
+# ── Filtros ───────────────────────────────────────────────────────────────────
+filters:
+  news_blackout_enabled: true
+  avoid_high_impact_news: true
+  use_macro_as_context_only: true
+
+# ── Logging e estado ──────────────────────────────────────────────────────────
 paths:
   state_file: state/state.json
   history_file: state/state_history.jsonl
+
+logging:
+  save_trade_journal: true
+  save_signal_history: true
+
 checks:
-  allowed_bar_age_s: 600   # 10 min — era 7200 (2h), inútil para M15/H1
+  allowed_bar_age_s: 600
   max_latency_p95_ms: 500
+
+# ── Broker / MT5 ─────────────────────────────────────────────────────────────
 live:
   enabled: true
   broker: mt5
   account_id: 6238864
+
+mt5_enabled: true
+mt5_login_env: MT5_LOGIN
+mt5_password_env: MT5_PASSWORD
+mt5_server_env: MT5_SERVER
+mt5_path_env: MT5_PATH
+
+# ── Data providers ────────────────────────────────────────────────────────────
 providers:
   fred:
     enabled: true
@@ -48,8 +191,7 @@ providers:
     api_key_env: NEWSAPI_API_KEY
     query: "forex OR markets"
 
-mt5_enabled: true
-mt5_login_env: MT5_LOGIN
-mt5_password_env: MT5_PASSWORD
-mt5_server_env: MT5_SERVER
-mt5_path_env: MT5_PATH
+dashboard:
+  enabled: true
+  api_port: 8000
+  refresh_seconds: 60
