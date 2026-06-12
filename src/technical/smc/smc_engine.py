@@ -1,12 +1,13 @@
 from __future__ import annotations
 """
-SMCEngine — aggregates StructureAnalyzer, OrderBlockDetector, FairValueGapDetector,
-and LiquiditySweepDetector into a single SMCResult.
+SMCEngine — agrega StructureAnalyzer, OrderBlockDetector, FairValueGapDetector
+e LiquiditySweepDetector num único SMCResult.
 
-SMCResult exposes:
-  - market_structure: MarketStructure (new — BOS/ChoCh, HH/HL, swing points)
-  - order_blocks / fvgs / liquidity_sweeps: raw structures
-  - Boolean fast-path flags (backward compatible with signal_generator + orchestrator)
+SMCResult expõe:
+  - market_structure: MarketStructure (BOS/ChoCh, HH/HL, swing points)
+  - order_blocks: list[OrderBlock] — nearest bullish + bearish (0–2 items)
+  - fvgs / liquidity_sweeps: estruturas cruas
+  - Flags booleanas fast-path (compatíveis com signal_generator + orchestrator)
 """
 
 import pandas as pd
@@ -20,18 +21,19 @@ from .liquidity import LiquiditySweepDetector, LiquiditySweep
 
 @dataclass
 class SMCResult:
-    # New modular structures
+    # Estruturas modulares
     market_structure: MarketStructure = field(
         default_factory=lambda: MarketStructure(
             trend="uncertain", last_event=None, last_event_level=None,
             last_event_bars_ago=None, hh_hl=False, lh_ll=False,
         )
     )
+    # nearest bullish + nearest bearish (0–2 items); None entries excluídas
     order_blocks: list[OrderBlock] = field(default_factory=list)
     fvgs: list[FairValueGap] = field(default_factory=list)
     liquidity_sweeps: list[LiquiditySweep] = field(default_factory=list)
 
-    # Fast-path booleans — backward compatible with signal_generator and orchestrator
+    # Fast-path booleans — backward compatible com signal_generator e orchestrator
     bullish_ob_nearby: bool = False
     bearish_ob_nearby: bool = False
     bullish_fvg: bool = False
@@ -61,24 +63,20 @@ class SMCEngine:
         price = float(df["close"].iloc[-1])
 
         structure = self._structure.analyze(df, atr)
-        obs       = self._ob.detect(df, structure, atr)
-        fvgs      = self._fvg.detect(df)
-        sweeps    = self._sweep.detect(df, structure, atr, analyzer=self._structure)
 
-        # Proximity thresholds for "nearby" checks
-        ob_prox  = max(atr * 0.5, price * 0.001) if atr > 0 else price * 0.001
+        # OrderBlockDetector nova API: retorna (nearest_bull, nearest_bear)
+        bull_ob, bear_ob = self._ob.detect(df, atr, price)
+        obs = [ob for ob in (bull_ob, bear_ob) if ob is not None]
+
+        fvgs   = self._fvg.detect(df)
+        sweeps = self._sweep.detect(df, structure, atr, analyzer=self._structure)
+
+        # OB nearby via price_in_ob() (inclui margem ATR × proximity_atr_mult)
+        bullish_ob_nearby = self._ob.price_in_ob(bull_ob, price, atr)
+        bearish_ob_nearby = self._ob.price_in_ob(bear_ob, price, atr)
+
+        # FVG proximity
         fvg_prox = max(atr * 0.3, price * 0.0005) if atr > 0 else price * 0.0005
-
-        bullish_ob_nearby = any(
-            ob.direction == "bullish" and not ob.mitigated
-            and ob.bottom - ob_prox <= price <= ob.top + ob_prox
-            for ob in obs
-        )
-        bearish_ob_nearby = any(
-            ob.direction == "bearish" and not ob.mitigated
-            and ob.bottom - ob_prox <= price <= ob.top + ob_prox
-            for ob in obs
-        )
         bullish_fvg = any(
             fvg.direction == "bullish" and not fvg.filled
             and fvg.bottom - fvg_prox <= price <= fvg.top + fvg_prox
@@ -90,7 +88,7 @@ class SMCEngine:
             for fvg in fvgs
         )
 
-        # Derive boolean BOS/ChoCh flags from MarketStructure.last_event
+        # BOS/ChoCh flags derivadas de MarketStructure.last_event
         last_bos: str | None = None
         last_choch: str | None = None
         evt = structure.last_event
