@@ -384,18 +384,25 @@ class OrderManager:
         return getattr(self._risk, "_min_lot", 0.01)
 
     def _enforce_min_stop(self, symbol: str, sl_distance: float) -> float:
-        """Expand sl_distance to meet MT5's minimum stop distance (prevents retcode=10016)."""
+        """Expand sl_distance to meet MT5's minimum stop distance (prevents retcode=10016).
+
+        When trade_stops_level=0 (dynamic broker minimum) uses spread×2 as floor.
+        """
         if self._dry_run:
             return sl_distance
         try:
             import MetaTrader5 as mt5lib
             info = mt5lib.symbol_info(symbol)
-            if info and info.trade_stops_level > 0 and info.point > 0:
-                min_dist = (info.trade_stops_level + 5) * info.point
+            if info and info.point > 0:
+                stops_pts = max(int(getattr(info, "trade_stops_level", 0)), 0)
+                spread_pts = max(int(getattr(info, "spread", 1)), 1)
+                # Minimum = max(broker freeze level, 2×spread) + 5pt buffer
+                min_pts = max(stops_pts, spread_pts * 2) + 5
+                min_dist = min_pts * info.point
                 if sl_distance < min_dist:
                     logger.debug(
-                        f"[MINSTOP] {symbol}: sl_dist {sl_distance:.6f} → {min_dist:.6f} "
-                        f"(broker_min={info.trade_stops_level}pts)"
+                        f"[MINSTOP] {symbol}: {sl_distance:.6f} → {min_dist:.6f} "
+                        f"(stops={stops_pts} spread={spread_pts}pts)"
                     )
                     return min_dist
         except Exception:
