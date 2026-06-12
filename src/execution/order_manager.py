@@ -341,6 +341,18 @@ class OrderManager:
         try:
             import MetaTrader5 as mt5lib
             order_type = mt5lib.ORDER_TYPE_BUY if direction == "buy" else mt5lib.ORDER_TYPE_SELL
+
+            # Final guard: ensure SL and TP meet broker minimum stop distance
+            min_dist = self._enforce_min_stop(symbol, 0.0)  # get minimum
+            if min_dist > 0:
+                sl_dist = abs(price - sl)
+                if sl_dist < min_dist:
+                    sl = round(price - min_dist if direction == "buy" else price + min_dist, 5)
+                if tp:
+                    tp_dist = abs(price - tp)
+                    if tp_dist < min_dist:
+                        tp = round(price + min_dist * 1.5 if direction == "buy" else price - min_dist * 1.5, 5)
+
             request = {
                 "action":       mt5lib.TRADE_ACTION_DEAL,
                 "symbol":       symbol,
