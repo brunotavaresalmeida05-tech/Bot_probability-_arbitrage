@@ -367,7 +367,8 @@ class Orchestrator:
             _family_analyses[sig.symbol] = analysis
             if analysis.confluence_delta != 0.0:
                 sig.confidence    = round(max(0.0, min(1.0, sig.confidence + analysis.confluence_delta)), 3)
-                sig.lot_multiplier = round(max(0.1, sig.lot_multiplier * (1.0 + analysis.confluence_delta)), 3)
+                if sig.lot_multiplier > 0:
+                    sig.lot_multiplier = round(max(0.1, sig.lot_multiplier * (1.0 + analysis.confluence_delta)), 3)
                 notes_str = " | ".join(analysis.notes)
                 logger.info(
                     f"[FAMILY] {sig.symbol}/{family.futures} delta={analysis.confluence_delta:+.3f}"

@@ -120,8 +120,9 @@ class OrderManager:
 
         # Apply signal quality multiplier to lot size
         if lot_multiplier < 1.0:
-            min_lot = getattr(self._risk, "_min_lot", 0.01)
-            sizing.lots = round(max(min_lot, sizing.lots * lot_multiplier), 4)
+            adjusted = sizing.lots * lot_multiplier
+            sym_min = self._symbol_min_vol(symbol)
+            sizing.lots = round(max(sym_min, adjusted), 4)
 
         # Live price
         price = self._get_price(symbol, direction)
@@ -370,6 +371,17 @@ class OrderManager:
             logger.exception(f"Order send error {symbol}: {e}")
             return OrderResult(False, symbol, direction, 0, 0, 0, 0,
                                reason=str(e), timestamp=ts)
+
+    def _symbol_min_vol(self, symbol: str) -> float:
+        """Return the symbol's MT5 minimum volume (volume_min), fallback to 0.01."""
+        try:
+            import MetaTrader5 as mt5lib
+            info = mt5lib.symbol_info(symbol)
+            if info and info.volume_min > 0:
+                return float(info.volume_min)
+        except Exception:
+            pass
+        return getattr(self._risk, "_min_lot", 0.01)
 
     def _enforce_min_stop(self, symbol: str, sl_distance: float) -> float:
         """Expand sl_distance to meet MT5's minimum stop distance (prevents retcode=10016)."""
