@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from src.analysis.smc import analyze as _smc_analyze, SMCResult
+from src.technical.smc import SMCEngine as _SMCEngine, SMCResult
+
+_smc_engine = _SMCEngine()
 """
 Technical Indicators — V9
 
@@ -353,6 +355,6 @@ def compute_bundle(
     bundle.atr = atr(highs, lows, closes)
     bundle.rsi = rsi_14(closes)
     bundle.adx = adx_indicator(highs, lows, closes)
-    bundle.smc = _smc_analyze(df, bundle.atr)
+    bundle.smc = _smc_engine.analyze(df, bundle.atr)
 
     return bundle
