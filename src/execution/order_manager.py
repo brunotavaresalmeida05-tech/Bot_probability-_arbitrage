@@ -411,8 +411,9 @@ class OrderManager:
             if info and info.point > 0:
                 stops_pts = max(int(getattr(info, "trade_stops_level", 0)), 0)
                 spread_pts = max(int(getattr(info, "spread", 1)), 1)
-                # Minimum = max(broker freeze level, 2×spread) + 5pt buffer
-                min_pts = max(stops_pts, spread_pts * 2) + 5
+                # spread×3 + 15pt buffer absorbs spread fluctuations between
+                # query time and order send (prevents retcode=10016 at boundary)
+                min_pts = max(stops_pts, spread_pts * 3) + 15
                 min_dist = min_pts * info.point
                 if sl_distance < min_dist:
                     logger.debug(
