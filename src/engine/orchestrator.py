@@ -86,8 +86,8 @@ from src.engine.trailing_manager import TrailingManager
 
 logger = logging.getLogger(__name__)
 
-TIMEFRAMES   = ["M5", "M15", "M30", "H1"]
-PRIMARY_TF   = "M5"
+TIMEFRAMES   = ["M1", "M5", "M15", "M30", "H1"]
+PRIMARY_TF   = "M1"
 STATE_PATH   = Path("state/state.json")
 HISTORY_PATH = Path("state/state_history.jsonl")
 

@@ -29,9 +29,9 @@ logger = logging.getLogger("main")
 
 # Sleep intervals per session type (seconds)
 _SLEEP = {
-    "london_ny_overlap": 60,
-    "london": 90,
-    "new_york": 90,
+    "london_ny_overlap": 30,
+    "london": 45,
+    "new_york": 45,
     "asia": 300,
     "closed": 300,
 }
@@ -47,12 +47,18 @@ def _load_config() -> dict:
 
 def _build_engine_config(cfg: dict) -> dict:
     """Flatten config into dict expected by Orchestrator."""
-    symbols = cfg.get("market", {}).get("symbols", [
+    market = cfg.get("market", {})
+    tradable = market.get("tradable", market.get("symbols", [
         "EURUSD", "GBPUSD", "USDJPY", "Usa500", "UsaTec", "Ger40", "GOLD", "Brent", "LCrude"
-    ])
+    ]))
+    futures_mirror    = market.get("futures_mirror", [])
+    context_benchmark = market.get("context_benchmark", [])
     risk = cfg.get("risk", {})
     return {
-        "symbols": symbols,
+        "symbols":           tradable,          # backward-compat flat list
+        "tradable":          tradable,
+        "futures_mirror":    futures_mirror,
+        "context_benchmark": context_benchmark,
         "risk": {
             "max_daily_loss_pct": risk.get("max_daily_loss", 0.03),
             "max_weekly_loss_pct": 0.08,
@@ -120,8 +126,7 @@ class BotApp:
                 sleep_s = get_sleep_seconds(session)
 
                 try:
-                    state = self._engine.run_cycle()
-                    # Pull MT5 account info every cycle
+                    # Pull MT5 account info BEFORE run_cycle so CB has correct daily_start_equity
                     if self._mt5 and getattr(self._mt5, "connected", False):
                         try:
                             import MetaTrader5 as mt5lib
@@ -130,6 +135,7 @@ class BotApp:
                                 self._engine.update_account(info)
                         except Exception:
                             pass
+                    state = self._engine.run_cycle()
                     # Per-asset tradeability summary
                     syms = self._cfg.get("market", {}).get("symbols", [])
                     active_syms = [s for s in syms if is_tradeable_for(s, session)]

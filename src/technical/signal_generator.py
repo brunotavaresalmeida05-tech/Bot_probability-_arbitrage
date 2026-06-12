@@ -23,7 +23,7 @@ Signal requires ALL of:
   - No higher TF veto
   - Bollinger not in full contraction
   - MACD direction aligns
-  - min 4/9 technical confirmations (8 tech + max 2 SMC with RSI guard)
+  - min 3/9 technical confirmations (8 tech + max 2 SMC with RSI guard)
 """
 from dataclasses import dataclass, field
 
@@ -454,7 +454,7 @@ def generate(
     # Gate selection by mode (pool = 9 = 8 tech + max 2 SMC with RSI guard):
     #   TRENDING  (V9.1) — 3/9 confirms, TotalScore=context, only H1 veto applies
     #   TECNICO_PURO     — 5/9 confirms, TotalScore >= 0.72, MTF not required
-    #   Normal macro     — 4/9 confirms, TotalScore execute/moderate, MTF >= 0.50
+    #   Normal macro     — 3/9 confirms, TotalScore execute/moderate, MTF >= 0.50
     if pure_technical and trending_regime:
         min_confirms = 3
         ts_ok = True
@@ -465,7 +465,7 @@ def generate(
         ts_ok = ts_result.total_score >= idio_cfg.get("min_total_score", 0.72)
         mtf_ok = True
     else:
-        min_confirms = 4
+        min_confirms = 3
         ts_ok = ts_result.decision in ("execute", "moderate")
         mtf_ok = mtf_result and mtf_result.confluence_score >= 0.50
 

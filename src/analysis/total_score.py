@@ -29,10 +29,10 @@ Weights vary by:
 Final weight: PesoFinal = 0.6 * PesoClasse + 0.4 * PesoTimeframe
 
 Thresholds:
-  >= 0.75: strong entry (execute)
-  0.55-0.75: moderate entry
-  0.40-0.55: wait for confirmation
-  < 0.40: no entry
+  >= 0.70: strong entry (execute)
+  0.50-0.70: moderate entry
+  0.35-0.50: wait for confirmation
+  < 0.35: no entry
   ES > 0.70: block even if TotalScore good
 """
 from dataclasses import dataclass, field
@@ -64,6 +64,7 @@ _CLASS_WEIGHTS: dict[str, tuple[float, ...]] = {
 
 # Weights by timeframe [MCS, BCS, VES, ES, CS, RS]
 _TF_WEIGHTS: dict[str, tuple[float, ...]] = {
+    "M1":  (0.18, 0.32, 0.28, 0.10, 0.07, 0.05),
     "M3":  (0.20, 0.30, 0.26, 0.12, 0.07, 0.05),
     "M5":  (0.24, 0.28, 0.24, 0.12, 0.08, 0.04),
     "M10": (0.26, 0.27, 0.22, 0.12, 0.09, 0.04),
@@ -79,9 +80,9 @@ _BETA  = 0.40   # weight of timeframe in combined weight
 _ES_BLOCK_THRESHOLD = 0.70
 
 # Entry thresholds
-THRESHOLD_STRONG   = 0.75
-THRESHOLD_MODERATE = 0.55
-THRESHOLD_WEAK     = 0.40
+THRESHOLD_STRONG   = 0.70
+THRESHOLD_MODERATE = 0.50
+THRESHOLD_WEAK     = 0.35
 
 
 def _sigmoid(x: float) -> float:

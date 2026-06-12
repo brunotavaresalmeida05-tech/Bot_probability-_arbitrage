@@ -36,6 +36,7 @@ _PERM_WEIGHTS = (0.45, 0.30, 0.15, 0.10)
 # Perm: TF curto → mais apertado (ruído), TF longo → mais estável
 
 _OPP_BASE_TF: dict[str, float] = {
+    "M1":  0.26,
     "M3":  0.30,
     "M5":  0.34,
     "M10": 0.37,
@@ -45,6 +46,7 @@ _OPP_BASE_TF: dict[str, float] = {
 }
 
 _PERM_BASE_TF: dict[str, float] = {
+    "M1":  0.18,
     "M3":  0.21,
     "M5":  0.24,
     "M10": 0.26,
