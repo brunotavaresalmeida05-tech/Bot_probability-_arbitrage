@@ -491,13 +491,19 @@ def generate(
         )
 
     # ── LOT MULTIPLIER ─────────────────────────────────────────────────────
-    # TRENDING:    regime.lot_context (VIX-adjusted) × TotalScore
+    # TRENDING:    regime.lot_context (VIX-adjusted) × TotalScore contínuo
+    #              ES block → 0; "wait" → usa score directamente (não zera)
     # TECNICO_PURO: TotalScore × idio lot_penalty (half size, no macro)
     # Normal:       scenario.lot_penalty × MTF.lot_adjustment × TotalScore
     lot_mult = 1.0
     if pure_technical and trending_regime:
         lot_mult *= regime_result.lot_context
-        lot_mult *= ts_result.lot_multiplier
+        if ts_result.blocked_by_es:
+            lot_mult = 0.0
+        else:
+            # usa total_score como escala contínua (floor 0.35) em vez de
+            # lot_multiplier binário que zera em "wait"
+            lot_mult *= max(ts_result.total_score, 0.35)
     elif pure_technical:
         lot_mult *= ts_result.lot_multiplier
         idio_cfg = _get_idio_config()
