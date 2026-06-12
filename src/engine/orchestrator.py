@@ -29,6 +29,22 @@ import logging
 import os
 import threading
 import time
+
+import numpy as np
+
+
+class _SafeEncoder(json.JSONEncoder):
+    """JSON encoder tolerant of numpy scalars and Python types."""
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, (np.bool_,)):
+            return bool(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -723,8 +739,8 @@ class Orchestrator:
     def _write_state(self, state: dict):
         try:
             STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            STATE_PATH.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+            STATE_PATH.write_text(json.dumps(state, indent=2, ensure_ascii=False, cls=_SafeEncoder), encoding="utf-8")
             with open(HISTORY_PATH, "a", encoding="utf-8") as f:
-                f.write(json.dumps(state, ensure_ascii=False) + "\n")
+                f.write(json.dumps(state, ensure_ascii=False, cls=_SafeEncoder) + "\n")
         except Exception as e:
             logger.error(f"State write error: {e}")
